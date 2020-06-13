@@ -25,6 +25,7 @@ flag release
 
 library
   exposed-modules:
+      Debugger
       Language.PureScript.PHP
       Language.PureScript.PHP.CodeGen
       Language.PureScript.PHP.CodeGen.AST
@@ -60,10 +61,12 @@ library
     , containers
     , directory
     , filepath
+    , hscolour
     , monad-control
     , mtl
     , parsec
     , pattern-arrows
+    , pretty-show
     , process
     , protolude
     , purescript
@@ -102,11 +105,13 @@ executable purehp
     , containers
     , directory
     , filepath
+    , hscolour
     , monad-control
     , mtl
     , optparse-applicative
     , parsec
     , pattern-arrows
+    , pretty-show
     , process
     , protolude
     , purehp

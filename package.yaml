@@ -29,10 +29,12 @@ dependencies:
   - directory
   - filepath
   - Glob
+  - hscolour
   - monad-control
   - mtl
   - parsec
   - pattern-arrows
+  - pretty-show
   - process
   - protolude
   - purescript

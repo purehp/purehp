@@ -36,6 +36,7 @@ import           System.IO                           (hPutStr, hPutStrLn,
                                                       stderr)
 import           System.IO.Error                     (isDoesNotExistError)
 
+
 data BuildOptions = BuildOptions
   { buildOutputDir :: FilePath
   , buildRun       :: Maybe String
@@ -52,9 +53,10 @@ compile BuildOptions{..} = do
     exitFailure
   (makeErrors, makeWarnings) <- MM.runMake P.defaultOptions $ do
     modules <- forM corefnFiles $ \corefn -> do
-      let extern = replaceFileName corefn "externs.json"
+      let extern = replaceFileName corefn "externs.cbor"
       res <- readJSONFile corefn
-      resExterns <- MM.readCborFile extern
+      resExterns <- MM.readExternsFile extern
+      -- resExterns <- MM.readCborFile extern
       case res >>= parseMaybe CoreFn.moduleFromJSON of
           Just (_version, module') -> do
             foreignFile <- liftIO $ inferForeignModule $ CoreFn.modulePath module'
