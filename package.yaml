@@ -36,6 +36,7 @@ dependencies:
   - process
   - protolude
   - purescript
+  - serialise
   - text
   - time
   - transformers

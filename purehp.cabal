@@ -25,7 +25,13 @@ flag release
 
 library
   exposed-modules:
-      Main
+      Language.PureScript.PHP
+      Language.PureScript.PHP.Errors
+      Language.PureScript.PHP.Errors.JSON
+      Language.PureScript.PHP.Errors.Types
+      Language.PureScript.PHP.Make
+      Language.PureScript.PHP.Make.Monad
+      Language.PureScript.PHP.Run
   other-modules:
       Paths_purehp
   hs-source-dirs:
@@ -55,6 +61,7 @@ library
     , process
     , protolude
     , purescript
+    , serialise
     , text
     , time
     , transformers
@@ -98,6 +105,7 @@ executable purehp
     , protolude
     , purehp
     , purescript
+    , serialise
     , text
     , time
     , transformers
