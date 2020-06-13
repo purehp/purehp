@@ -36,6 +36,8 @@ import           System.IO                           (hPutStr, hPutStrLn,
                                                       stderr)
 import           System.IO.Error                     (isDoesNotExistError)
 
+import Debug.Trace
+
 
 data BuildOptions = BuildOptions
   { buildOutputDir :: FilePath
@@ -96,13 +98,14 @@ compile BuildOptions{..} = do
   where
 
 
-
+  -- always true for now
   needsBuild buildActions ts m = do
-    outputTs <- Make.getOutputTimestamp buildActions m
-    pure $ case outputTs of
-      Nothing -> True
-      Just outTs | outTs < ts -> True
-      _ -> False
+    pure True
+    -- outputTs <- Make.getOutputTimestamp buildActions m
+    -- pure $ case outputTs of
+    --   Nothing -> True
+    --   Just outTs | outTs < ts -> True
+    --   _ -> False
 
 -- | Arguments: verbose, use JSON, warnings, errors
 printWarningsAndErrors :: Bool -> Bool -> MultipleErrors -> Either MultipleErrors a -> IO ()

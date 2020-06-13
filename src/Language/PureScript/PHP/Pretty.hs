@@ -54,18 +54,25 @@ literals = mkPattern' match
       [ return $ emit $ "$" <> x <> " = "
       , prettyPrintPHP' e
       ]
+    match (PVar x) = return $ emit x
+    match (PArrayLiteral es) = mconcat <$> sequence
+      [ return $ emit "array( "
+      , intercalate (emit ", ") <$> mapM prettyPrintPHP' es
+      , return $ emit " )"
+      ]
+    match (PAssociativeArrayLiteral es) = do
+      els <- mapM (\(s, v) -> do
+                     php <- prettyPrintPHP' v
+                     return $ mconcat [ emit $ prettyPrintStringPHP s
+                                      , emit " => "
+                                      , php
+                                      ]
+                 ) es
+      return $ mconcat
+        [ emit "array( "
+        , intercalate (emit ", ") els
+        , emit " )" ]
 
-    match (PFunctionDef ss xs e) = mconcat <$> sequence (
-       (case ss of
-         (Just SourceSpan { spanName = spanName, spanStart = spanStart }) ->
-           [ do
-               t <- transformFilename <$> get
-               return $ emit $ "-file(\"" <> T.pack (t spanName) <> "\", " <> T.pack (show $ sourcePosLine spanStart) <> ").\n"
-           ]
-         _ -> [])
-       <>
-       [ prettyPrintPHP' e
-       ])
 
     -- match (PFunctionDef ss xs e) = mconcat <$> sequence (
     --   (case ss of

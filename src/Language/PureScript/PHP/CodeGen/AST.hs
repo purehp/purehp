@@ -33,6 +33,10 @@ data PHP
   | PApp PHP [PHP]
   -- | Block
   | PBlock [PHP]
+  -- | An array
+  | PArrayLiteral [PHP]
+  -- | An associative array
+  | PAssociativeArrayLiteral [(PSString, PHP)]
 
   deriving (Show, Eq)
 

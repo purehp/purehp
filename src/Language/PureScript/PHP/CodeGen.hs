@@ -8,8 +8,8 @@ module Language.PureScript.PHP.CodeGen
   , moduleToPHP
   ) where
 
+import           Debugger
 import           Prelude.Compat
-import Debugger
 
 import           Language.PureScript.PHP.CodeGen.AST       as AST
 
@@ -30,6 +30,7 @@ import           Control.Monad.Writer                      (MonadWriter (..))
 import qualified Data.Map                                  as M
 import           Data.Maybe                                (catMaybes,
                                                             fromMaybe, mapMaybe)
+import           Data.String                               (fromString)
 
 import           Control.Monad.Supply.Class
 
@@ -61,9 +62,9 @@ freshNamePHP = fmap (("_@" <>) . T.pack . show) fresh
 
 tyArity :: SourceType -> Int
 tyArity (TypeApp _ (TypeApp _ fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
-tyArity (ForAll _ _ _ ty _) = tyArity ty
-tyArity (ConstrainedType _ _ ty) = 1 + tyArity ty
-tyArity _ = 0
+tyArity (ForAll _ _ _ ty _)             = tyArity ty
+tyArity (ConstrainedType _ _ ty)        = 1 + tyArity ty
+tyArity _                               = 0
 
 uncurriedFnArity :: ModuleName -> T.Text -> SourceType -> Maybe Int
 uncurriedFnArity moduleName fnName = go (-1)
@@ -140,19 +141,22 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       -- {-# WARNING topBindToPHP "Missing Rec case" #-}
       topBindToPHP :: Bind Ann -> m [PHP]
       topBindToPHP (NonRec ann ident val) = topNonRecToPHP ann ident val
-      topBindToPHP _ = pure []
+      topBindToPHP _                      = pure []
       -- topBindToPHP (Rec vals) = biconcat <$> traverse (uncurry . uncurry $ topNonRecToPHP) vals
 
       uncurriedFnArity' :: ModuleName -> T.Text -> Qualified Ident -> Maybe Int
       uncurriedFnArity' fnMod fn ident =
         case M.lookup ident types of
           Just t -> uncurriedFnArity fnMod fn t
-          _ -> Nothing
+          _      -> Nothing
 
       effFnArity = uncurriedFnArity' effectUncurried "EffectFn"
       fnArity = uncurriedFnArity' dataFunctionUncurried "Fn"
 
       topNonRecToPHP :: Ann -> Ident -> Expr Ann -> m [PHP]
+      topNonRecToPHP _ ident val = do
+        php <- valueToPHP val
+        pure $ [PVarBind (runIdent ident) php]
       -- manual binding just ot make it work now
       topNonRecToPHP _ ident (Literal _ (NumericLiteral n)) = do
         pure $ [PVarBind (runIdent ident) (PNumericLiteral n)]
@@ -193,7 +197,7 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
 
       findApps :: Bind Ann -> M.Map (Qualified Ident) Int -> M.Map (Qualified Ident) Int
       findApps (NonRec _ _ val) apps = findApps' val apps
-      findApps (Rec vals) apps = foldr findApps' apps $ map snd vals
+      findApps (Rec vals) apps       = foldr findApps' apps $ map snd vals
 
       findApps' :: Expr Ann -> M.Map (Qualified Ident) Int -> M.Map (Qualified Ident) Int
       findApps' expr apps = case expr of
@@ -219,14 +223,14 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
         _ -> apps
         where
           updateArity newArity old@(Just oldArity) | oldArity > newArity = old
-          updateArity newArity _ = Just newArity
+          updateArity newArity _                   = Just newArity
 
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
-          unApp other args = (other, args)
+          unApp other args           = (other, args)
 
       findApps'' (NonRec _ _ e) apps = findApps' e apps
-      findApps'' (Rec binds) apps = foldr findApps' apps $ map snd binds
+      findApps'' (Rec binds) apps    = foldr findApps' apps $ map snd binds
 
 
       findAppCase (CaseAlternative _ (Right e)) apps = findApps' e apps
@@ -276,3 +280,8 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       literalToValuePHP' :: (a -> m PHP) -> Literal a -> m PHP
       literalToValuePHP' _ (NumericLiteral n) = return $ PNumericLiteral n
       literalToValuePHP' _ (StringLiteral s) = return $ PStringLiteral s
+      literalToValuePHP' _ (CharLiteral c) = return $ PStringLiteral (fromString [c])
+      literalToValuePHP' f (ArrayLiteral xs) = PArrayLiteral <$> mapM f xs
+      literalToValuePHP' f (ObjectLiteral ps) = do
+         pairs <- mapM (sndM f) ps
+         pure $ PAssociativeArrayLiteral pairs
