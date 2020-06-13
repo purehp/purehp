@@ -72,6 +72,25 @@ literals = mkPattern' match
         [ emit "array( "
         , intercalate (emit ", ") els
         , emit " )" ]
+    match (PFunRef x n) = error "We don't need funrefs?"
+    match (PFunFull name binders) = mconcat <$> sequence
+      [ return $ emit "function() {\n"
+      -- , withIndent $ prettyPrintBinders binders
+      , currentIndent
+      , return $ emit "}"
+      ]
+      -- where
+      --   prettyPrintBinders :: (Emit gen) -> [(PFunBinder, PHP)] -> StateT PrinterState Maybe gen
+      --   prettyPrintBinders bs = intercalate (emit ";\n") <$> mapM prettyPrintBinder bs
+
+      --   matchBody (PBlick es) = prettyPrintBlockBody es
+      --   matchBody e = mconcat <$> sequence
+      --     [ currentIndent
+      --     , prettyPrintPHP' e
+      --     ]
+
+        -- prettyPrintBinder :: (Emit gen) =>
+
 
 
     -- match (PFunctionDef ss xs e) = mconcat <$> sequence (

@@ -60,6 +60,10 @@ import           Debug.Trace                               (traceM)
 freshNamePHP :: (MonadSupply m) => m T.Text
 freshNamePHP = fmap (("_@" <>) . T.pack . show) fresh
 
+isTopLevelBinding :: Qualified t -> Bool
+isTopLevelBinding (Qualified (Just _) _) = True
+isTopLevelBinding (Qualified Nothing _) = False
+
 tyArity :: SourceType -> Int
 tyArity (TypeApp _ (TypeApp _ fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
 tyArity (ForAll _ _ _ ty _)             = tyArity ty
@@ -94,10 +98,10 @@ moduleToPHP :: forall m.
 moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignExports =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToPHP decls
+    traceM $ show res
     reexports <- traverse reExportForeign foreigns
     -- let (exports, phpDecls) = concat $ res <> reexports
     let phpDecls = concat $ res <> reexports
-    traceM $ show phpDecls
     optimized <- traverse optimize phpDecls
 
     let usedFfi = Set.fromList $ map runIdent foreigns
@@ -255,6 +259,11 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       --           go e = e
       --   etc...
 
+      qualifiedToPHP' mn' moduleType ident = error "QualifiedToPHP'"
+
+      qualifiedToPHP _ = error "QualifiedToPHP"
+
+      qualifiedToVar (Qualified _ ident) = identToVar ident
 
       valueToPHP :: Expr Ann -> m PHP
       valueToPHP = valueToPHP' Nothing
@@ -262,15 +271,34 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       valueToPHP' :: Maybe Ident -> Expr Ann -> m PHP
       valueToPHP' _ (Literal (pos, _, _, _) l) =
         rethrowWithPosition pos $ literalToValuePHP l
-      -- valueToPHP' _ (Var _ (Qualified (Just (ModuleName [ProperName prim])) (Ident undef)))
-      --   | prim == C.prim, undef == C.undefined =
-      -- ...
+      valueToPHP' _ (Var _ (Qualified (Just (ModuleName prim)) (Ident undef)))
+        | prim == C.prim, undef == C.undefined = error "Qualified Var"
+      valueToPHP' _ (Var _ ident) | isTopLevelBinding ident = pure $
+        case M.lookup ident arities of
+          Just 1 -> PFunRef (qualifiedToPHP ident) 1
+          _ | Just arity <- effFnArity ident <|> fnArity ident
+            , arity > 0 -> PFunRef (qualifiedToPHP ident) arity
+          _ -> PApp (qualifiedToPHP ident) []
+      valueToPHP' _ (Var _ ident) = return $ PVar $ qualifiedToVar ident
+
+      valueToPHP' ident (Abs _ arg val) = do
+        ret <- valueToPHP val
+
+        let fixIdent (Ident "$__unused") = UnusedIdent
+            fixIdent x = x
+            arg' = case fixIdent arg of
+                     UnusedIdent -> "_"
+                     _           -> identToVar arg
+        return $ PFun1 (fmap identToVar ident) arg' ret
+
       valueToPHP' _ (Let _ ds val) = do
         ds' <- concat <$> mapM bindToPHP ds
         ret <- valueToPHP val
         -- TODO: rename variables rather than creating temporary scope just for this
         -- TODO: This scope doesn't really work probably if we actually want to shadow parent scope
         return $ iife (ds' ++ [ret])
+
+      valueToPHP' _ x = error $ "Unknown " <> show x
 
       iife exprs = PApp (PFun0 Nothing (PBlock exprs)) []
 

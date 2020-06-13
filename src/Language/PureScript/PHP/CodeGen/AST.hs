@@ -27,6 +27,8 @@ data PHP
   | PVarBind Text PHP
   -- | A variable
   | PVar Text
+  -- | A function reference f/1
+  | PFunRef PSString Int
   -- | A fun definition
   | PFunFull (Maybe Text) [(PFunBinder, PHP)]
   -- | Function application
