@@ -26,11 +26,17 @@ flag release
 library
   exposed-modules:
       Language.PureScript.PHP
+      Language.PureScript.PHP.CodeGen
+      Language.PureScript.PHP.CodeGen.AST
+      Language.PureScript.PHP.CodeGen.Common
+      Language.PureScript.PHP.CodeGen.Optimizer
       Language.PureScript.PHP.Errors
       Language.PureScript.PHP.Errors.JSON
       Language.PureScript.PHP.Errors.Types
       Language.PureScript.PHP.Make
       Language.PureScript.PHP.Make.Monad
+      Language.PureScript.PHP.Parser
+      Language.PureScript.PHP.Pretty
       Language.PureScript.PHP.Run
   other-modules:
       Paths_purehp
