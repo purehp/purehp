@@ -25,4 +25,4 @@ import Language.PureScript.PHP.CodeGen.AST
 -- Apply a series of optimizer passes to simplified Javascript code
 --
 optimize :: MonadSupply m => PHP -> m PHP
-optimize php = error "Missing optimize"
+optimize php = pure php

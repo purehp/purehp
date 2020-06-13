@@ -2,16 +2,16 @@
 -- Common code generation utility functions
 --
 module Language.PureScript.PHP.CodeGen.Common
-( runAtom
+--( runAtom
 -- , atomPS
-, atom
-, atomModuleName
-, phpModuleName
+-- , atom
+-- , atomModuleName
+( phpModuleName
 , ModuleType(..)
 -- , toAtomName
 -- , toVarName
 -- , identToAtomName
--- , identToVar
+, identToVar
 -- , nameIsErlReserved
 -- , utf8Binary
 -- , encodeChar
@@ -32,16 +32,16 @@ import           Prelude.Compat                      hiding (all)
 import           Language.PureScript.PHP.CodeGen.AST
 
 
-runAtom :: Atom -> Text
-runAtom at = error "Missing"
-
-atom :: Text -> Text
-atom s = error "Missing"
-
 data ModuleType = ForeignModule | PureScriptModule
 
-atomModuleName :: ModuleName -> ModuleType -> Text
-atomModuleName mn mt = phpModuleName mn mt
-
 phpModuleName :: ModuleName -> ModuleType -> Text
-phpModuleName (ModuleName pns) moduleType = error "Missing"
+phpModuleName (ModuleName pns) moduleType = pns  -- intercalate "_" ((toAtomName) `map` pns) <>
+  -- case moduleType of
+  --   ForeignModule    -> "@foreign"
+  --   PureScriptModule -> "@ps"
+
+toVarName :: Text -> Text
+toVarName v = T.pack $ "$" ++ T.unpack v
+
+identToVar :: Ident -> Text
+identToVar = toVarName . runIdent
