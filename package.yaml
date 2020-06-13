@@ -1,0 +1,121 @@
+name:                purehp
+version:             0.1.0.0
+#synopsis:
+#description:
+homepage:            https://github.com/dariooddenino/purehp#readme
+license:             BSD3
+author:              Dario Oddenino
+maintainer:          branch13@gmail.com
+copyright:           2020 Dario Oddenino
+category:            Language
+extra-source-files:
+- README.md
+
+ghc-options:
+  -Wall
+  -O2
+
+dependencies:
+  - aeson
+  - aeson-better-errors
+  - aeson-pretty
+  - ansi-terminal
+  - base >= 4.7 && < 5
+  - base-compat
+  - boxes
+  - bytestring
+  - Cabal
+  - containers
+  - directory
+  - filepath
+  - Glob
+  - monad-control
+  - mtl
+  - parsec
+  - pattern-arrows
+  - process
+  - protolude
+  - purescript
+  - text
+  - time
+  - transformers
+  - transformers-base
+  - transformers-compat
+  - utf8-string
+build-tools:
+  - happy
+
+library:
+  source-dirs: src
+  default-extensions:
+    - ConstraintKinds
+    - DataKinds
+    - DeriveFunctor
+    - DeriveFoldable
+    - DeriveTraversable
+    - DeriveGeneric
+    - DerivingStrategies
+    - EmptyDataDecls
+    - FlexibleContexts
+    - KindSignatures
+    - LambdaCase
+    - MultiParamTypeClasses
+    - NoImplicitPrelude
+    - PatternGuards
+    - RankNTypes
+    - RecordWildCards
+    - OverloadedStrings
+    - ScopedTypeVariables
+    - TupleSections
+    - ViewPatterns
+
+executables:
+  purehp:
+    main:             Main.hs
+    source-dirs:      app
+    ghc-options:      -Wall
+                      -O2
+                      -fno-warn-unused-do-bind
+                      -threaded
+                      -rtsopts
+                      -with-rtsopts=-N
+    dependencies:
+      - ansi-wl-pprint
+      - optparse-applicative
+      - purehp
+    when:
+    - condition: flag(release)
+      then:
+        cpp-options: -DRELEASE
+      else:
+        dependencies:
+        - gitrev
+
+# tests:
+#   purehp:
+#     type:         exitcode-stdio-1.0
+#     source-dirs:  test
+#     main:         Spec.hs
+#     dependencies: purehp
+#     ghc-options:  -threaded
+#                   -rtsopts
+#                   -with-rtsopts=-N
+
+# benchmarks:
+#     purehp:
+#         type:            exitcode-stdio-1.0
+#         source-dirs:     benchmark
+#         main:            Main.hs
+# #        dependencies:   gauge
+# #                      , purehp
+#         ghc-options:    -threaded
+#                         -rtsopts
+#                         -with-rtsopts=-N
+
+flags:
+  release:
+    description: >
+      Mark this build as a release build: prevents inclusion of extra
+      info e.g. commit SHA in --version output)
+    manual: false
+    default: false

@@ -1,0 +1,112 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           purehp
+version:        0.1.0.0
+category:       Language
+homepage:       https://github.com/dariooddenino/purehp#readme
+author:         Dario Oddenino
+maintainer:     branch13@gmail.com
+copyright:      2020 Dario Oddenino
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+flag release
+  description: Mark this build as a release build: prevents inclusion of extra info e.g. commit SHA in --version output)
+
+  manual: False
+  default: False
+
+library
+  exposed-modules:
+      Main
+  other-modules:
+      Paths_purehp
+  hs-source-dirs:
+      src
+  default-extensions: ConstraintKinds DataKinds DeriveFunctor DeriveFoldable DeriveTraversable DeriveGeneric DerivingStrategies EmptyDataDecls FlexibleContexts KindSignatures LambdaCase MultiParamTypeClasses NoImplicitPrelude PatternGuards RankNTypes RecordWildCards OverloadedStrings ScopedTypeVariables TupleSections ViewPatterns
+  ghc-options: -Wall -O2
+  build-tools:
+      happy
+  build-depends:
+      Cabal
+    , Glob
+    , aeson
+    , aeson-better-errors
+    , aeson-pretty
+    , ansi-terminal
+    , base >=4.7 && <5
+    , base-compat
+    , boxes
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , monad-control
+    , mtl
+    , parsec
+    , pattern-arrows
+    , process
+    , protolude
+    , purescript
+    , text
+    , time
+    , transformers
+    , transformers-base
+    , transformers-compat
+    , utf8-string
+  default-language: Haskell2010
+
+executable purehp
+  main-is: Main.hs
+  other-modules:
+      Build
+      Version
+      Paths_purehp
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -O2 -Wall -O2 -fno-warn-unused-do-bind -threaded -rtsopts -with-rtsopts=-N
+  build-tools:
+      happy
+  build-depends:
+      Cabal
+    , Glob
+    , aeson
+    , aeson-better-errors
+    , aeson-pretty
+    , ansi-terminal
+    , ansi-wl-pprint
+    , base >=4.7 && <5
+    , base-compat
+    , boxes
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , monad-control
+    , mtl
+    , optparse-applicative
+    , parsec
+    , pattern-arrows
+    , process
+    , protolude
+    , purehp
+    , purescript
+    , text
+    , time
+    , transformers
+    , transformers-base
+    , transformers-compat
+    , utf8-string
+  if flag(release)
+    cpp-options: -DRELEASE
+  else
+    build-depends:
+        gitrev
+  default-language: Haskell2010
