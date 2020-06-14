@@ -1,9 +1,12 @@
 module Main where
 
-import Prelude
+-- import Prelude
 
--- _int :: Int
--- _int = 5
+_int :: Int
+_int = 5
+
+_int2 :: Int
+_int2 = _int
 
 -- _string :: String
 -- _string = "Hello World!"
@@ -17,8 +20,8 @@ import Prelude
 -- _record :: { x :: Int, y :: String }
 -- _record = { x: 1, y: "Hello" }
 
-_fun :: Int -> Int
-_fun arg = arg + arg
+-- _fun :: Int -> Int
+-- _fun arg = arg + arg
 
 
 -- func :: Int -> Int
