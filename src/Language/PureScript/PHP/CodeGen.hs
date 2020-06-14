@@ -46,6 +46,7 @@ import           Language.PureScript.Options
 import           Language.PureScript.Traversals            (sndM)
 import           Language.PureScript.Types
 
+import Language.PureScript.PSString (PSString)
 import           Language.PureScript.PHP.CodeGen.Common
 import           Language.PureScript.PHP.CodeGen.Optimizer
 import           Language.PureScript.PHP.Errors            (MultipleErrors,
@@ -259,9 +260,16 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       --           go e = e
       --   etc...
 
-      qualifiedToPHP' mn' moduleType ident = error "QualifiedToPHP'"
 
-      qualifiedToPHP _ = error "QualifiedToPHP"
+      qualifiedToPHP' ident = fromString $ T.unpack $ runIdent ident
+
+      qualifiedToPHP :: Qualified Ident -> PSString
+      qualifiedToPHP (Qualified (Just mn') ident)
+        | mn == mn' && ident `Set.notMember` declaredExportsSet = qualifiedToPHP' ident
+          -- PStringLiteral $ runIdent ident
+      qualifiedToPHP (Qualified (Just mn') ident) = qualifiedToPHP' ident -- PStringLiteral $ runIdent ident
+      qualifiedToPHP x = error $ "Invalid qualified identifier " <> T.unpack (showQualified showIdent x)
+
 
       qualifiedToVar (Qualified _ ident) = identToVar ident
 
@@ -278,7 +286,7 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
           Just 1 -> PFunRef (qualifiedToPHP ident) 1
           _ | Just arity <- effFnArity ident <|> fnArity ident
             , arity > 0 -> PFunRef (qualifiedToPHP ident) arity
-          _ -> PApp (qualifiedToPHP ident) []
+          _ -> PApp (PStringLiteral $ qualifiedToPHP ident) []
       valueToPHP' _ (Var _ ident) = return $ PVar $ qualifiedToVar ident
 
       valueToPHP' ident (Abs _ arg val) = do
@@ -291,6 +299,29 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
                      _           -> identToVar arg
         return $ PFun1 (fmap identToVar ident) arg' ret
 
+      valueToPHP' _ e@App{} = do
+        let (f, args) = unApp e []
+        args' <- mapM valueToPHP args
+        case f of
+          Var (_, _, _, Just IsNewtype) _ -> return (head args')
+          Var (_, _, _, Just (IsConstructor _ fields)) (Qualified _ ident)
+            | length args == length fields ->
+              return $ constructorLiteral (runIdent ident) args'
+          Var (_, _, _, Just IsTypeClassConstructor) name ->
+            error "Type class"
+            -- return $ curriedApp args' $ PApp ()
+          Var _ qi@(Qualified _ _)
+            | arity <- fromMaybe 0 (M.lookup qi arities)
+            , length args == arity
+            -> return $ PApp (PStringLiteral $ qualifiedToPHP qi) args'
+          Var _ _ -> error "Bog"
+
+          where
+            unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
+            unApp (App _ val arg) args = unApp val (arg : args)
+            unApp other args = (other, args)
+
+
       valueToPHP' _ (Let _ ds val) = do
         ds' <- concat <$> mapM bindToPHP ds
         ret <- valueToPHP val
@@ -298,9 +329,22 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
         -- TODO: This scope doesn't really work probably if we actually want to shadow parent scope
         return $ iife (ds' ++ [ret])
 
+      valueToPHP' _ (Constructor (_, _, _, Just IsNewtype) _ _ _) = error "newtype ctor"
+
+      valueToPHP' _ (Constructor _ _ ctor fields) =
+        let createFn =
+              let body = constructorLiteral ctor ((PVar . identToVar) `map` fields)
+              in foldr (\f inner -> PFun1 Nothing (identToVar f) inner) body fields
+        in pure createFn
+
       valueToPHP' _ x = error $ "Unknown " <> show x
 
       iife exprs = PApp (PFun0 Nothing (PBlock exprs)) []
+
+      constructorLiteral name args = error "Constructor"
+
+      curriedApp :: [PHP] -> PHP -> PHP
+      curriedApp _ _ = error "curried app"
 
       literalToValuePHP :: Literal (Expr Ann) -> m PHP
       literalToValuePHP = literalToValuePHP' valueToPHP

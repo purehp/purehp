@@ -44,14 +44,24 @@ data PHP
 
 -- | Simple 0-arity version of PFun1
 pattern PFun0 :: Maybe Text -> PHP -> PHP
-pattern PFun0 name e = PFunFull name [(PFunBinder [] Nothing, e)]
+pattern PFun0 name e = PFunFull name [(PFunBinder [], e)]
 
 -- | Simple fun definition fun f(X) -> e end (arity 1 with single head with simple variable pattern, name optional)
 pattern PFun1 :: Maybe Text -> Text -> PHP -> PHP
-pattern PFun1 name var e = PFunFull name [(PFunBinder [PVar var] Nothing, e)]
+pattern PFun1 name var e = PFunFull name [(PFunBinder [PVar var], e)]
+
+extractVars :: [PHP] -> Maybe [Text]
+extractVars = traverse var
+  where var (PVar x) = Just x
+        var _ = Nothing
+
+-- | Simple arity-N versions of PFun1
+pattern PFunN :: Maybe Text -> [Text] -> PHP -> PHP
+pattern PFunN name vars e <- PFunFull name [(PFunBinder (extractVars -> Just vars), e)] where
+  PFunN name vars e = PFunFull name [(PFunBinder (map PVar vars), e)]
 
 data PFunBinder
-  = PFunBinder [PHP] (Maybe Guard)
+  = PFunBinder [PHP]
   deriving (Show, Eq)
 
 data Guard = Guard PHP

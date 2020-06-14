@@ -1,25 +1,28 @@
 module Main where
 
-x :: Int
-x = 5
+import Prelude
 
-y :: Int
-y =  3
+-- _int :: Int
+-- _int = 5
 
-foo :: String
-foo = "Hello World!"
+-- _string :: String
+-- _string = "Hello World!"
 
-bar :: Char
-bar = 'a'
+-- _char :: Char
+-- _char = 'a'
 
-z :: Array Int
-z = [1, 2, 3, 4]
+-- _array :: Array Int
+-- _array = [1, 2, 3, 4]
 
-obj :: { x :: Int, y :: String }
-obj = { x: 1, y: "Hello" }
+-- _record :: { x :: Int, y :: String }
+-- _record = { x: 1, y: "Hello" }
 
-func :: Int -> Int
-func arg = arg
+_fun :: Int -> Int
+_fun arg = arg + arg
 
--- foo :: Int -> Int -> Int
--- foo a b = a + b
+
+-- func :: Int -> Int
+-- func arg = arg + 2
+
+-- func3 :: Int -> Int -> Int
+-- func3 arg arg2 = arg + arg2
