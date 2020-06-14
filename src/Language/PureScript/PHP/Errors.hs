@@ -1,45 +1,55 @@
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 
 module Language.PureScript.PHP.Errors
   ( module Language.PureScript.PHP.Errors
   ) where
 
 import           Prelude.Compat
-import           Protolude (ordNub)
+import           Protolude                            (ordNub)
 
-import           Control.Arrow ((&&&))
+import           Control.Arrow                        ((&&&))
+import           Control.Exception                    (displayException)
 import           Control.Monad
-import           Control.Monad.Error.Class (MonadError(..))
+import           Control.Monad.Error.Class            (MonadError (..))
 import           Control.Monad.Trans.State.Lazy
 import           Control.Monad.Writer
-import           Control.Exception (displayException)
-import           Data.Char (isSpace)
-import           Data.Either (partitionEithers)
-import           Data.Foldable (fold)
-import           Data.List (nubBy, partition, dropWhileEnd, sort, sortBy)
-import qualified Data.List.NonEmpty as NEL
-import           Data.Maybe (fromMaybe, mapMaybe)
-import qualified Data.Map as M
-import           Data.Ord (comparing)
-import qualified Data.Text as T
-import           Data.Text (Text)
-import           Language.PureScript.AST (SourceSpan, ErrorMessageHint(..), HintCategory(..), DeclarationRef(..), ImportDeclarationType(..), Expr(..))
+import           Data.Char                            (isSpace)
+import           Data.Either                          (partitionEithers)
+import           Data.Foldable                        (fold)
+import           Data.List                            (dropWhileEnd, nubBy,
+                                                       partition, sort, sortBy)
+import qualified Data.List.NonEmpty                   as NEL
+import qualified Data.Map                             as M
+import           Data.Maybe                           (fromMaybe, mapMaybe)
+import           Data.Ord                             (comparing)
+import           Data.Text                            (Text)
+import qualified Data.Text                            as T
+import           Language.PureScript.AST              (DeclarationRef (..),
+                                                       ErrorMessageHint (..),
+                                                       Expr (..),
+                                                       HintCategory (..),
+                                                       ImportDeclarationType (..),
+                                                       SourceSpan)
 import           Language.PureScript.AST.SourcePos
-import qualified Language.PureScript.Constants as C
+import qualified Language.PureScript.Constants        as C
 import           Language.PureScript.Crash
 import           Language.PureScript.Environment
-import           Language.PureScript.Label (Label(..))
+import           Language.PureScript.Label            (Label (..))
 import           Language.PureScript.Names
-import           Language.PureScript.Pretty
-import           Language.PureScript.Pretty.Common (endWith)
-import           Language.PureScript.PSString (decodeStringWithReplacement)
-import           Language.PureScript.Types
 import           Language.PureScript.PHP.Errors.Types
-import qualified System.Console.ANSI as ANSI
-import qualified Text.Parsec as P
-import qualified Text.Parsec.Error as PE
-import           Text.Parsec.Error (Message(..))
-import qualified Text.PrettyPrint.Boxes as Box
+import           Language.PureScript.Pretty
+import           Language.PureScript.Pretty.Common    (endWith)
+import           Language.PureScript.PSString         (decodeStringWithReplacement)
+import           Language.PureScript.Types
+import qualified System.Console.ANSI                  as ANSI
+import qualified Text.Parsec                          as P
+import           Text.Parsec.Error                    (Message (..))
+import qualified Text.Parsec.Error                    as PE
+import qualified Text.PrettyPrint.Boxes               as Box
 
 newtype ErrorSuggestion = ErrorSuggestion Text
 
@@ -48,14 +58,14 @@ errorSpan :: ErrorMessage -> Maybe (NEL.NonEmpty SourceSpan)
 errorSpan = findHint matchSpan
   where
   matchSpan (PositionedError ss) = Just ss
-  matchSpan _ = Nothing
+  matchSpan _                    = Nothing
 
 -- | Get the module name for an error
 errorModule :: ErrorMessage -> Maybe ModuleName
 errorModule = findHint matchModule
   where
   matchModule (ErrorInModule mn) = Just mn
-  matchModule _ = Nothing
+  matchModule _                  = Nothing
 
 findHint :: (ErrorMessageHint -> Maybe a) -> ErrorMessage -> Maybe a
 findHint f (ErrorMessage hints _) = getLast . foldMap (Last . f) $ hints
@@ -64,19 +74,19 @@ findHint f (ErrorMessage hints _) = getLast . foldMap (Last . f) $ hints
 stripModuleAndSpan :: ErrorMessage -> ErrorMessage
 stripModuleAndSpan (ErrorMessage hints e) = ErrorMessage (filter (not . shouldStrip) hints) e
   where
-  shouldStrip (ErrorInModule _) = True
+  shouldStrip (ErrorInModule _)   = True
   shouldStrip (PositionedError _) = True
-  shouldStrip _ = False
+  shouldStrip _                   = False
 
 -- | Get the error code for a particular error type
 errorCode :: ErrorMessage -> Text
 errorCode em = case unwrapErrorMessage em of
-  MissingFFIModule{} -> "MissingFFIModule"
-  UnnecessaryFFIModule{} -> "UnnecessaryFFIModule"
+  MissingFFIModule{}          -> "MissingFFIModule"
+  UnnecessaryFFIModule{}      -> "UnnecessaryFFIModule"
   MissingFFIImplementations{} -> "MissingFFIImplementations"
-  UnusedFFIImplementations{} -> "UnusedFFIImplementations"
-  InvalidFFIArity{} -> "InvalidFFIArity"
-  FileIOError{} -> "FileIOError"
+  UnusedFFIImplementations{}  -> "UnusedFFIImplementations"
+  InvalidFFIArity{}           -> "InvalidFFIArity"
+  FileIOError{}               -> "FileIOError"
 
 
 -- | A stack trace for an error
@@ -127,11 +137,11 @@ addHints hints = onErrorMessages $ \(ErrorMessage hints' se) -> ErrorMessage (hi
 
 -- | A map from rigid type variable name/unknown variable pairs to new variables.
 data TypeMap = TypeMap
-  { umSkolemMap   :: M.Map Int (String, Int, Maybe SourceSpan)
+  { umSkolemMap  :: M.Map Int (String, Int, Maybe SourceSpan)
   -- ^ a map from skolems to their new names, including source and naming info
-  , umUnknownMap  :: M.Map Int Int
+  , umUnknownMap :: M.Map Int Int
   -- ^ a map from unification variables to their new names
-  , umNextIndex   :: Int
+  , umNextIndex  :: Int
   -- ^ unknowns and skolems share a source of names during renaming, to
   -- avoid overlaps in error messages. This is the next label for either case.
   } deriving Show
@@ -236,7 +246,7 @@ prettyPrintSingleError (PPEOptions codeColor full _level _showDocs relPath) e = 
       [ foldr renderHint (indent (renderSimpleErrorMessage simple)) hints
       ] ++
       maybe [] (return . Box.moveDown 1) typeInformation
-      -- TODO: 
+      -- TODO:
       -- [ Box.moveDown 1 $ paras
       --     [ line $ "See " <> errorDocUri e <> " for more information, "
       --     , line $ "or to contribute content related to this " <> levelText <> "."
@@ -276,14 +286,14 @@ prettyPrintSingleError (PPEOptions codeColor full _level _showDocs relPath) e = 
             ]
 
     renderSimpleErrorMessage (MissingFFIModule mn) =
-      line $ "The foreign module implementation for module " <> markCode (runModuleName mn) <> " is missing."            
+      line $ "The foreign module implementation for module " <> markCode (runModuleName mn) <> " is missing."
 
     renderSimpleErrorMessage (UnnecessaryFFIModule mn path) =
       paras [ line $ "An unnecessary foreign module implementation was provided for module " <> markCode (runModuleName mn) <> ": "
             , indent . lineS $ path
             , line $ "Module " <> markCode (runModuleName mn) <> " does not contain any foreign import declarations, so a foreign module is not necessary."
             ]
-    
+
     renderSimpleErrorMessage (MissingFFIImplementations mn idents) =
       paras [ line $ "The following values are not defined in the foreign module for module " <> markCode (runModuleName mn) <> ": "
             , indent . paras $ map (line . runIdent) idents
@@ -292,7 +302,7 @@ prettyPrintSingleError (PPEOptions codeColor full _level _showDocs relPath) e = 
       paras [ line $ "The following definitions in the foreign module for module " <> markCode (runModuleName mn) <> " are unused: "
             , indent . paras $ map (line . runIdent) idents
             ]
-            
+
 
     renderHint :: ErrorMessageHint -> Box.Box -> Box.Box
     renderHint (ErrorUnifyingTypes t1@RCons{} t2@RCons{}) detail =
@@ -439,13 +449,13 @@ prettyPrintSingleError (PPEOptions codeColor full _level _showDocs relPath) e = 
     -- If both rows are not empty, print them as diffs
     -- If verbose print all rows else only print unique rows
     printRows :: Type a -> Type a -> (Box.Box, Box.Box)
-    printRows r1 r2 = case (full, r1, r2) of 
+    printRows r1 r2 = case (full, r1, r2) of
       (True, _ , _) -> (printRow typeAsBox r1, printRow typeAsBox r2)
 
-      (_, RCons{}, RCons{}) -> 
+      (_, RCons{}, RCons{}) ->
         let (sorted1, sorted2) = filterRows (rowToList r1) (rowToList r2)
         in (printRow typeDiffAsBox sorted1, printRow typeDiffAsBox sorted2)
-        
+
       (_, _, _) -> (printRow typeAsBox r1, printRow typeAsBox r2)
 
 
@@ -481,23 +491,23 @@ prettyPrintSingleError (PPEOptions codeColor full _level _showDocs relPath) e = 
       case (hintCategory x, hintCategory y) of
         (OtherHint, _) -> False
         (_, OtherHint) -> False
-        (c1, c2) -> c1 == c2
+        (c1, c2)       -> c1 == c2
 
     -- | See https://github.com/purescript/purescript/issues/1802
     stripRedudantHints :: SimpleErrorMessage -> [ErrorMessageHint] -> [ErrorMessageHint]
     stripRedudantHints _ = id
 
   hintCategory :: ErrorMessageHint -> HintCategory
-  hintCategory ErrorCheckingType{}                  = ExprHint
-  hintCategory ErrorInferringType{}                 = ExprHint
-  hintCategory ErrorInExpression{}                  = ExprHint
-  hintCategory ErrorUnifyingTypes{}                 = CheckHint
-  hintCategory ErrorInSubsumption{}                 = CheckHint
-  hintCategory ErrorInApplication{}                 = CheckHint
-  hintCategory ErrorCheckingKind{}                  = CheckHint
-  hintCategory ErrorSolvingConstraint{}             = SolverHint
-  hintCategory PositionedError{}                    = PositionHint
-  hintCategory _                                    = OtherHint
+  hintCategory ErrorCheckingType{}      = ExprHint
+  hintCategory ErrorInferringType{}     = ExprHint
+  hintCategory ErrorInExpression{}      = ExprHint
+  hintCategory ErrorUnifyingTypes{}     = CheckHint
+  hintCategory ErrorInSubsumption{}     = CheckHint
+  hintCategory ErrorInApplication{}     = CheckHint
+  hintCategory ErrorCheckingKind{}      = CheckHint
+  hintCategory ErrorSolvingConstraint{} = SolverHint
+  hintCategory PositionedError{}        = PositionHint
+  hintCategory _                        = OtherHint
 
 -- Pretty print and export declaration
 prettyPrintExport :: DeclarationRef -> Text
@@ -605,9 +615,9 @@ prettyPrintParseErrorMessages msgOr msgUnknown msgExpecting msgUnExpected msgEnd
                          ms | null pre  -> commasOr ms
                             | otherwise -> pre ++ " " ++ commasOr ms
 
-  commasOr []       = ""
-  commasOr [m]      = m
-  commasOr ms       = commaSep (init ms) ++ " " ++ msgOr ++ " " ++ last ms
+  commasOr []  = ""
+  commasOr [m] = m
+  commasOr ms  = commaSep (init ms) ++ " " ++ msgOr ++ " " ++ last ms
 
   commaSep          = separate ", " . clean
 
@@ -716,5 +726,5 @@ parU xs f =
 
     collectErrors :: [Either MultipleErrors b] -> m [b]
     collectErrors es = case partitionEithers es of
-      ([], rs) -> return rs
+      ([], rs)  -> return rs
       (errs, _) -> throwError $ fold errs

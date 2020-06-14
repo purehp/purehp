@@ -1,5 +1,7 @@
-{-# LANGUAGE GADTs #-}
-
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE ViewPatterns      #-}
 -- |
 -- This module generates code in the simplified Erlang intermediate representation from Purescript code
 --
@@ -10,32 +12,38 @@ module Language.PureScript.PHP.CodeGen
 
 import           Debugger
 import           Prelude.Compat
+import           Protolude                                 (ordNub)
 
 import           Language.PureScript.PHP.CodeGen.AST       as AST
 
 import           Control.Monad                             (replicateM, unless)
-import           Data.Foldable
-import           Data.List                                 (nub)
+import qualified Data.Foldable                             as F
+import           Data.List                                 (intersect, (\\))
+import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
 import           Data.Traversable
 
-import           Data.Set                                  (Set)
-import qualified Data.Set                                  as Set
+import qualified Data.Set                                  as S
 
 import           Control.Applicative                       ((<|>))
-import           Control.Arrow                             (first, second)
-import           Control.Monad.Error.Class                 (MonadError (..))
-import           Control.Monad.Reader                      (MonadReader (..))
+import           Control.Arrow                             ((&&&))
+import           Control.Monad                             (forM, replicateM,
+                                                            void)
+import           Control.Monad.Error.Class                 (MonadError (..),
+                                                            throwError)
+import           Control.Monad.Reader                      (MonadReader (..),
+                                                            asks)
 import           Control.Monad.Writer                      (MonadWriter (..))
 import qualified Data.Map                                  as M
-import           Data.Maybe                                (catMaybes,
-                                                            fromMaybe, mapMaybe)
+import           Data.Maybe                                (fromMaybe,
+                                                            isNothing)
 import           Data.String                               (fromString)
 
 import           Control.Monad.Supply.Class
 
 import           Language.PureScript.AST                   (SourceSpan,
                                                             nullSourceSpan)
+import           Language.PureScript.AST.SourcePos
 import qualified Language.PureScript.Constants             as C
 import           Language.PureScript.CoreFn                hiding
                                                             (moduleExports)
@@ -45,9 +53,13 @@ import           Language.PureScript.Names
 import           Language.PureScript.Options
 import           Language.PureScript.Traversals            (sndM)
 import           Language.PureScript.Types
+import Language.PureScript.CST.Utils (internalError)
 
-import Language.PureScript.PSString (PSString)
-import           Language.PureScript.PHP.CodeGen.Common
+import           Language.PureScript.PHP.CodeGen.AST       (PHP,
+                                                            everywhereTopDownM,
+                                                            withSourceSpan)
+import qualified Language.PureScript.PHP.CodeGen.AST       as PHP
+import           Language.PureScript.PHP.CodeGen.Common    as Common
 import           Language.PureScript.PHP.CodeGen.Optimizer
 import           Language.PureScript.PHP.Errors            (MultipleErrors,
                                                             addHint,
@@ -55,9 +67,256 @@ import           Language.PureScript.PHP.Errors            (MultipleErrors,
                                                             rethrow,
                                                             rethrowWithPosition)
 import           Language.PureScript.PHP.Errors.Types
+import           Language.PureScript.PSString              (PSString, mkString, decodeString)
 
 import           Debug.Trace                               (traceM)
 
+
+moduleToPHP
+  :: forall m
+   . (Monad m, MonadReader Options m, MonadSupply m, MonadError MultipleErrors m)
+  => Module Ann
+  -> Maybe PHP
+  -> m [PHP]
+moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
+  rethrow (addHint (ErrorInModule mn)) $ do
+    let usedNames = concatMap getNames decls
+        mnLookup = renameImports usedNames imps
+        decls' = renameModules mnLookup decls
+    phpDecls <- mapM bindToPHP decls'
+    -- pureerl does the reexports stuff here
+    optimized <- traverse (traverse optimize) phpDecls
+    let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToPHP safeName, origName)) $ M.toList mnLookup
+        usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
+    phpImports <- traverse (importToPHP mnLookup)
+                  . filter (flip S.member usedModuleNames)
+                  . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
+    F.traverse_ (F.traverse_ checkIntegers) optimized
+    comments <- not <$> asks optionsNoComments
+    -- let phpTagOpen = PStringLiteral Nothing "<?php"
+    --     phpTagClose = PStringLiteral Nothing "?>"
+        --header = if comments && not (null coms) then PComment Nothing coms strict else strict
+        --foreign'
+    let moduleBody = phpImports ++ concat optimized
+        -- foreignExps = exps `intersect` foreigns // module.exports ...
+        -- standardExps = exps \\ foreignExps
+    return moduleBody
+
+    where
+
+      -- | Extracts all declaration names from a binding group.
+      getNames :: Bind Ann -> [Ident]
+      getNames (NonRec _ ident _) = [ident]
+      getNames (Rec vals)         = map (snd . fst) vals
+
+      -- | Create alternative names for each module to ensure they don't collide
+      -- with declaration names.
+      renameImports :: [Ident] -> [(Ann, ModuleName)] -> M.Map ModuleName (Ann, ModuleName)
+      renameImports = go M.empty
+        where
+          go :: M.Map ModuleName (Ann, ModuleName) -> [Ident] -> [(Ann, ModuleName)] -> M.Map ModuleName (Ann, ModuleName)
+          go acc used ((ann, mn') : mns') =
+            let mni = Ident $ runModuleName mn'
+            in if mn' /= mn && mni `elem` used
+               then let newName = freshModuleName 1 mn' used
+                    in go (M.insert mn' (ann, newName) acc) (Ident (runModuleName newName) : used) mns'
+               else go (M.insert mn' (ann, mn') acc) used mns'
+          go acc _ [] = acc
+
+      freshModuleName :: Integer -> ModuleName -> [Ident] -> ModuleName
+      freshModuleName i mn'@(ModuleName name) used =
+        let newName = ModuleName $ name <> "_" <> T.pack (show i)
+        in if Ident (runModuleName newName) `elem` used
+           then freshModuleName (i + 1) mn' used
+           else newName
+
+      -- | Generates PHP code for a module import, binding the required module
+      -- to the alternative
+      importToPHP :: M.Map ModuleName (Ann, ModuleName) -> ModuleName -> m PHP
+      importToPHP _ _ = error "Implement importToPHP"
+
+      -- | Replaces the `ModuleName`s in the AST so that the generated code referes to
+      -- the collision-avoiding renamed module imports.
+      renameModules :: M.Map ModuleName (Ann, ModuleName) -> [Bind Ann] -> [Bind Ann]
+      renameModules mnLookup binds =
+        let (f, _, _) = everywhereOnValues id goExpr goBinder
+        in map f binds
+        where
+          goExpr :: Expr a -> Expr a
+          goExpr (Var ann q) = Var ann (renameQual q)
+          goExpr e = e
+          goBinder :: Binder a -> Binder a
+          goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
+          goBinder b = b
+          renameQual :: Qualified a -> Qualified a
+          renameQual (Qualified (Just mn') a) = 
+            let (_,mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+            in Qualified (Just mnSafe) a
+          renameQual q = q
+
+      -- | Find the set of ModuleNames -> PHP -> S.Set ModuleName
+      findModules :: M.Map Text ModuleName -> PHP -> S.Set ModuleName
+      findModules mnReverseLookup = PHP.everything mappend go
+        where
+          go (PVar _ name) = foldMap S.singleton $ M.lookup name mnReverseLookup
+          go _ = mempty
+
+      -- | Generate code in the simplified PHP intermediate representation for a declaration
+      bindToPHP (NonRec ann ident val) = return <$> nonRecToPHP ann ident val
+      bindToPHP (Rec vals) = forM vals (uncurry . uncurry $ nonRecToPHP)
+
+      -- | Generate code in the simplified PHP intermediate representation fora single non-recurtsive
+      -- declaration.
+      --
+      -- The main purpose of this function is to handle code generation for comments.
+      nonRecToPHP :: Ann -> Ident -> Expr Ann -> m PHP
+      nonRecToPHP a i e@(extractAnn -> (_, com, _, _))
+        | not (null com) = do
+            withoutComment <- asks optionsNoComments
+            if withoutComment
+              then nonRecToPHP a i (modifyAnn removeComments e)
+              else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
+      nonRecToPHP (ss, _, _, _) ident val = do
+        php <- valueToPHP val ident
+        withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
+
+      withPos :: SourceSpan -> PHP -> m PHP
+      withPos ss php = do
+        withSM <- asks (elem JSSourceMap . optionsCodegenTargets)
+        return $ if withSM
+          then withSourceSpan ss php
+          else php
+
+      -- | Generate code in the simplified PHP intermediate representation for a variable baded on a
+      -- PureScript identifier.
+      var :: Ident -> PHP
+      var = PVar Nothing . identToPHP
+
+      -- | Generate code in the simplified PHP intermediate representation for an accessor based on
+      -- a PureScript identifier. If the name is not valid in PHP (symbol based, reserved name) an
+      -- indexer is returned.
+      accessor :: Ident -> PHP -> PHP
+      accessor (Ident prop) = accessorString $ mkString prop
+      accessor (GenIdent _ _) = internalError "GenIdent in accessor"
+      accessor UnusedIdent = internalError "UnusedIdent in accessor"
+
+      accessorString :: PSString -> PHP -> PHP
+      accessorString prop = PIndexer Nothing (PStringLiteral Nothing prop)
+
+      -- | Generate code in the simplified PHP intermediate representation fora value or expression.
+      valueToPHP :: Expr Ann -> Ident -> m PHP
+      valueToPHP e i =
+        let (ss, _, _, _) = extractAnn e in
+          withPos ss =<< valueToPHP' e i
+
+      valueToPHP' :: Expr Ann -> Ident -> m PHP
+      valueToPHP' (Literal (pos, _, _, _) l) i =
+        rethrowWithPosition pos $ literalToValuePHP pos l i
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) _ =
+        return $ accessorString "value" $ qualifiedToPHP id name
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) _ =
+        return $ accessorString "create" $ qualifiedToPHP id name
+
+      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ =
+        error "Abs TypeClassConstructor"  
+
+      valueToPHP' (Abs _ arg val) i = do
+        ret <- valueToPHP val i
+        let phpArg = case arg of
+                        UnusedIdent -> []
+                        _           -> [identToPHP arg]
+        return $ PFunction Nothing Nothing phpArg (PBlock Nothing [PReturn Nothing ret])
+
+      valueToPHP' (Var _ ident) _ = return $ varToPHP ident
+
+      -- valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
+      --   return $ PVariableIntroduction Nothing (properToPHP ctor) (Just $
+      --              PObject
+      --   )
+
+
+      valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
+
+      iife :: Text -> [PHP] -> PHP
+      iife v exprs = PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing $ exprs ++ [PReturn Nothing $ PVar Nothing v])) []
+
+      literalToValuePHP :: SourceSpan -> Literal (Expr Ann) -> Ident -> m PHP
+      literalToValuePHP ss (NumericLiteral n) _ = return $ PNumericLiteral (Just ss) n
+      literalToValuePHP ss (StringLiteral s) _ = return $ PStringLiteral (Just ss) s
+      literalToValuePHP ss (CharLiteral c) _ = return $ PStringLiteral (Just ss) (fromString [c])
+      literalToValuePHP ss (BooleanLiteral b) _ = return $ PBooleanLiteral (Just ss) b
+      literalToValuePHP ss (ArrayLiteral xs) i = PArrayLiteral (Just ss) <$> mapM (`valueToPHP` i) xs
+      literalToValuePHP ss (ObjectLiteral ps) i = do
+        ret <- mapM (sndM (`valueToPHP` i)) ps
+        -- TODO this fromMaybe shouldn't be here. i think I'm doing something wrong
+        let fields :: [PHP]
+            fields = map (\(i', p) -> PClassVariableIntroduction (Just ss) (fromMaybe "" $ decodeString i') (Just p)) ret
+        return $ PObjectLiteral (Just ss) fields
+        -- let fs = map (\(s, p) -> PClassVariableIntroduction Nothing (fromMaybe "" $ decodeString s) (Just p)) ps
+        -- return $ PObjectLiteral (Just ss) fs
+        -- PObjectLiteral (Just ss) <$> mapM (sndM (`valueToPHP` i)) ps
+
+      -- | Shallow copy an objecExprt
+      -- I don't think we'll need it?
+      extendObj :: PHP -> [(PSString, PHP)] -> m PHP
+      extendObj _ _ = error "Implement extend object"
+
+
+      -- | Generate code in the simplified PHP intermediate representation for a reference to a
+      -- variable.
+      varToPHP :: Qualified Ident -> PHP
+      varToPHP (Qualified Nothing ident) = var ident
+      varToPHP qual = qualifiedToPHP id qual
+
+      -- | Generate code in the simplified PHP intermediate representation for a refrence to a
+      -- variable that may have a qualified name.
+      qualifiedToPHP :: (a -> Ident) -> Qualified a -> PHP
+      qualifiedToPHP f (Qualified (Just C.Prim) a) = PVar Nothing . runIdent $ f a
+      qualifiedToPHP f (Qualified (Just mn') a) 
+        | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
+      qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
+
+      foreignIdent :: Ident -> PHP
+      foreignIdent ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")
+
+      -- | Generate code in the simplified PHP intermediate representation for a pattern match binders
+      -- and guards.
+      binderToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> PHP
+      binderToPHP ss binders vals = error "Implement binderToPHP"
+
+      -- | Generate code in the simplified PHP intermediate representation for a pattern match
+      -- binder.
+      binderToPHP' :: Text -> [PHP] -> Binder Ann -> m [PHP]
+      binderToPHP' _ _ _ = error "Implement binderToPHP'"
+
+      literalToBinderPHP :: Text -> [PHP] -> Literal (Binder Ann) -> m [PHP]
+      literalToBinderPHP _ _ _ = error "Implement literalToBinderPHP"
+
+      -- Check that all integers fall within the valid int range for PHP.
+      -- TODO: check what's needed for PHP
+      checkIntegers :: PHP -> m ()
+      checkIntegers = void . everywhereTopDownM go
+        where
+          go :: PHP -> m PHP
+          go p = return p
+      --     go (PUnary _ PNegate (PNumericLiteral ss (Left i))) =
+      --       -- Move the negation inside the literal; since this is a top-down
+      --       -- traversal doing this replacement will stop the next case from raising
+      --       -- the error when attempting to use -2147483648, as if left unrewritten
+      --       -- the value is `Unary Negate (NumericLiteral (Left 2147483648))`, and
+      --       -- 2147483648 is larger than the maximum allowed int.
+      --       return $ PNumericLiteral ss (Left (-i))
+      --     go php@(PNumericLiteral ss (Left i)) = 
+      --       let minInt = -2147483648
+      --           maxInt = 2147483647
+      --       in if i < minInt || i > maxInt
+      --         then throwError . maybe errorMessage errorMessage' ss $ InOutOfRange i "PHP" minInt maxInt
+      --         else return php
+      --     go other = return other
+
+      
+
+{-
 freshNamePHP :: (MonadSupply m) => m T.Text
 freshNamePHP = fmap (("_@" <>) . T.pack . show) fresh
 
@@ -159,46 +418,48 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       fnArity = uncurriedFnArity' dataFunctionUncurried "Fn"
 
       topNonRecToPHP :: Ann -> Ident -> Expr Ann -> m [PHP]
-      topNonRecToPHP _ ident val = do
-        php <- valueToPHP val
-        pure $ [PVarBind (runIdent ident) php]
-      -- manual binding just ot make it work now
-      topNonRecToPHP _ ident (Literal _ (NumericLiteral n)) = do
-        pure $ [PVarBind (runIdent ident) (PNumericLiteral n)]
-      topNonRecToPHP (ss, _, _, _) ident val = do
-        let eann@(_, _, _, meta') = extractAnn val
-            -- ident' = case meta of
-            --   Just IsTypeClassConstructor -> identToTypeclassCtor ident
-            --   -- _ -> ???
-        generateFunctionOverloads (Just ss) eann ident val id
+      topNonRecToPHP _ _ _ = error "topNonRecToPHP"
+      -- topNonRecToPHP _ ident val = do
+      --   php <- valueToPHP val
+      --   pure $ [PVarBind (runIdent ident) php]
+      -- -- manual binding just ot make it work now
+      -- topNonRecToPHP _ ident (Literal _ (NumericLiteral n)) = do
+      --   pure $ [PVarBind (runIdent ident) (PNumericLiteral n)]
+      -- topNonRecToPHP (ss, _, _, _) ident val = do
+      --   let eann@(_, _, _, meta') = extractAnn val
+      --       -- ident' = case meta of
+      --       --   Just IsTypeClassConstructor -> identToTypeclassCtor ident
+      --       --   -- _ -> ???
+      --   generateFunctionOverloads (Just ss) eann ident val id
 
       generateFunctionOverloads :: Maybe SourceSpan -> Ann -> Ident -> Expr Ann -> (PHP -> PHP) -> m [PHP]
       generateFunctionOverloads ss eann ident val outerWrapper = do
-        -- Always generate the plain curried form, f x y = ... ~> f () -> fun (X) -> fun (Y)
-        let qident = Qualified (Just mn) ident
-        php <- valueToPHP val
-        let curried = [PFunctionDef ss [] (outerWrapper php)]
-        -- For effective > 0 (either plain urriedn funs, FnX or EffectFnX) generate an uncurried overload
-        -- f x y = ... ~> f(X,Y) -. ((...)(X))(Y)
-        -- Relying on inlining to clean up some junk here
-        let mkRunApp modName prefix n = App eann (Var eann (Qualified (Just modName) (Ident $ prefix <> T.pack (show (n :: Int)))))
-            (wrap, unwrap) = case effFnArity qident of
-              Just n -> (mkRunApp effectUncurried C.runEffectFn n, \e -> PApp e [])
-              _ | Just n <- fnArity qident -> (mkRunApp dataFunctionUncurried C.runFn n, id)
-              _ -> (id, id)
+        error "generateFunctionOverloads"
+        -- -- Always generate the plain curried form, f x y = ... ~> f () -> fun (X) -> fun (Y)
+        -- let qident = Qualified (Just mn) ident
+        -- php <- valueToPHP val
+        -- let curried = [PFunctionDef ss [] (outerWrapper php)]
+        -- -- For effective > 0 (either plain urriedn funs, FnX or EffectFnX) generate an uncurried overload
+        -- -- f x y = ... ~> f(X,Y) -. ((...)(X))(Y)
+        -- -- Relying on inlining to clean up some junk here
+        -- let mkRunApp modName prefix n = App eann (Var eann (Qualified (Just modName) (Ident $ prefix <> T.pack (show (n :: Int)))))
+        --     (wrap, unwrap) = case effFnArity qident of
+        --       Just n -> (mkRunApp effectUncurried C.runEffectFn n, \e -> PApp e [])
+        --       _ | Just n <- fnArity qident -> (mkRunApp dataFunctionUncurried C.runFn n, id)
+        --       _ -> (id, id)
 
-        uncurried <- case effFnArity qident <|> fnArity qident <|> M.lookup qident arities of
-          Just arity | arity > 0 -> do
-            vars <- replicateM arity freshNamePHP
-            -- Apply in CoreFn then translate to take advantage of translation of full/partial application
-            php' <- valueToPHP $ foldl (\fn a -> App eann fn (Var eann (Qualified Nothing (Ident a)))) (wrap val) vars
-            pure [PFunctionDef ss vars (outerWrapper (unwrap php'))]
-          _ -> pure []
+        -- uncurried <- case effFnArity qident <|> fnArity qident <|> M.lookup qident arities of
+        --   Just arity | arity > 0 -> do
+        --     vars <- replicateM arity freshNamePHP
+        --     -- Apply in CoreFn then translate to take advantage of translation of full/partial application
+        --     php' <- valueToPHP $ foldl (\fn a -> App eann fn (Var eann (Qualified Nothing (Ident a)))) (wrap val) vars
+        --     pure [PFunctionDef ss vars (outerWrapper (unwrap php'))]
+        --   _ -> pure []
 
-        let res = curried <> uncurried
-        pure $ if ident `Set.member` declaredExportsSet
-               then res
-               else res
+        -- let res = curried <> uncurried
+        -- pure $ if ident `Set.member` declaredExportsSet
+        --        then res
+        --        else res
 
       findApps :: Bind Ann -> M.Map (Qualified Ident) Int -> M.Map (Qualified Ident) Int
       findApps (NonRec _ _ val) apps = findApps' val apps
@@ -242,8 +503,8 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       findAppCase (CaseAlternative _ (Left ges)) apps = foldr findApps' apps $ map snd ges
 
       bindToPHP :: Bind Ann -> m [PHP]
-      bindToPHP (NonRec _ ident val) =
-        pure . PVarBind (identToVar ident) <$> valueToPHP' (Just ident) val
+      bindToPHP (NonRec _ ident val) = error "bindToPHP"
+        -- pure . PVarBind (identToVar ident) <$> valueToPHP' (Just ident) val
 
       -- For recursive bindings F(X) = E1, G(X) = E2, ... we have a problem as the variables are not
       -- in scope until each expression is defined. To avoid lifting to the top level first generate
@@ -271,75 +532,78 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       qualifiedToPHP x = error $ "Invalid qualified identifier " <> T.unpack (showQualified showIdent x)
 
 
-      qualifiedToVar (Qualified _ ident) = identToVar ident
+      qualifiedToVar (Qualified _ ident) = error "qualifiedToVar" -- identToVar ident
 
       valueToPHP :: Expr Ann -> m PHP
       valueToPHP = valueToPHP' Nothing
 
       valueToPHP' :: Maybe Ident -> Expr Ann -> m PHP
-      valueToPHP' _ (Literal (pos, _, _, _) l) =
-        rethrowWithPosition pos $ literalToValuePHP l
-      valueToPHP' _ (Var _ (Qualified (Just (ModuleName prim)) (Ident undef)))
-        | prim == C.prim, undef == C.undefined = error "Qualified Var"
-      valueToPHP' _ (Var _ ident) | isTopLevelBinding ident = pure $
-        case M.lookup ident arities of
-          Just 1 -> PFunRef (qualifiedToPHP ident) 1
-          _ | Just arity <- effFnArity ident <|> fnArity ident
-            , arity > 0 -> PFunRef (qualifiedToPHP ident) arity
-          _ -> PApp (PStringLiteral $ qualifiedToPHP ident) []
-      valueToPHP' _ (Var _ ident) = return $ PVar $ qualifiedToVar ident
+      valueToPHP' _ _ = error "valueToPHP'"
 
-      valueToPHP' ident (Abs _ arg val) = do
-        ret <- valueToPHP val
+      -- valueToPHP' :: Maybe Ident -> Expr Ann -> m PHP
+      -- valueToPHP' _ (Literal (pos, _, _, _) l) =
+      --   rethrowWithPosition pos $ literalToValuePHP l
+      -- valueToPHP' _ (Var _ (Qualified (Just (ModuleName prim)) (Ident undef)))
+      --   | prim == C.prim, undef == C.undefined = error "Qualified Var"
+      -- valueToPHP' _ (Var _ ident) | isTopLevelBinding ident = pure $
+      --   case M.lookup ident arities of
+      --     Just 1 -> PFunRef (qualifiedToPHP ident) 1
+      --     _ | Just arity <- effFnArity ident <|> fnArity ident
+      --       , arity > 0 -> PFunRef (qualifiedToPHP ident) arity
+      --     _ -> PApp (PStringLiteral $ qualifiedToPHP ident) []
+      -- valueToPHP' _ (Var _ ident) = return $ PVar $ qualifiedToVar ident
 
-        let fixIdent (Ident "$__unused") = UnusedIdent
-            fixIdent x = x
-            arg' = case fixIdent arg of
-                     UnusedIdent -> "_"
-                     _           -> identToVar arg
-        return $ PFun1 (fmap identToVar ident) arg' ret
+      -- valueToPHP' ident (Abs _ arg val) = do
+      --   ret <- valueToPHP val
 
-      valueToPHP' _ e@App{} = do
-        let (f, args) = unApp e []
-        args' <- mapM valueToPHP args
-        case f of
-          Var (_, _, _, Just IsNewtype) _ -> return (head args')
-          Var (_, _, _, Just (IsConstructor _ fields)) (Qualified _ ident)
-            | length args == length fields ->
-              return $ constructorLiteral (runIdent ident) args'
-          Var (_, _, _, Just IsTypeClassConstructor) name ->
-            error "Type class"
-            -- return $ curriedApp args' $ PApp ()
-          Var _ qi@(Qualified _ _)
-            | arity <- fromMaybe 0 (M.lookup qi arities)
-            , length args == arity
-            -> return $ PApp (PStringLiteral $ qualifiedToPHP qi) args'
-          Var _ _ -> error "Bog"
+      --   let fixIdent (Ident "$__unused") = UnusedIdent
+      --       fixIdent x = x
+      --       arg' = case fixIdent arg of
+      --                UnusedIdent -> "_"
+      --                _           -> identToVar arg
+      --   return $ PFun1 (fmap identToVar ident) arg' ret
 
-          where
-            unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
-            unApp (App _ val arg) args = unApp val (arg : args)
-            unApp other args = (other, args)
+      -- valueToPHP' _ e@App{} = do
+      --   let (f, args) = unApp e []
+      --   args' <- mapM valueToPHP args
+      --   case f of
+      --     Var (_, _, _, Just IsNewtype) _ -> return (head args')
+      --     Var (_, _, _, Just (IsConstructor _ fields)) (Qualified _ ident)
+      --       | length args == length fields ->
+      --         return $ constructorLiteral (runIdent ident) args'
+      --     Var (_, _, _, Just IsTypeClassConstructor) name ->
+      --       error "Type class"
+      --       -- return $ curriedApp args' $ PApp ()
+      --     Var _ qi@(Qualified _ _)
+      --       | arity <- fromMaybe 0 (M.lookup qi arities)
+      --       , length args == arity
+      --       -> return $ PApp (PStringLiteral $ qualifiedToPHP qi) args'
+      --     Var _ _ -> error "Bog"
+
+      --     where
+      --       unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
+      --       unApp (App _ val arg) args = unApp val (arg : args)
+      --       unApp other args = (other, args)
 
 
-      valueToPHP' _ (Let _ ds val) = do
-        ds' <- concat <$> mapM bindToPHP ds
-        ret <- valueToPHP val
-        -- TODO: rename variables rather than creating temporary scope just for this
-        -- TODO: This scope doesn't really work probably if we actually want to shadow parent scope
-        return $ iife (ds' ++ [ret])
+      -- valueToPHP' _ (Let _ ds val) = do
+      --   ds' <- concat <$> mapM bindToPHP ds
+      --   ret <- valueToPHP val
+      --   -- TODO: rename variables rather than creating temporary scope just for this
+      --   -- TODO: This scope doesn't really work probably if we actually want to shadow parent scope
+      --   return $ iife (ds' ++ [ret])
 
-      valueToPHP' _ (Constructor (_, _, _, Just IsNewtype) _ _ _) = error "newtype ctor"
+      -- valueToPHP' _ (Constructor (_, _, _, Just IsNewtype) _ _ _) = error "newtype ctor"
 
-      valueToPHP' _ (Constructor _ _ ctor fields) =
-        let createFn =
-              let body = constructorLiteral ctor ((PVar . identToVar) `map` fields)
-              in foldr (\f inner -> PFun1 Nothing (identToVar f) inner) body fields
-        in pure createFn
+      -- valueToPHP' _ (Constructor _ _ ctor fields) =
+      --   let createFn =
+      --         let body = constructorLiteral ctor ((PVar . identToVar) `map` fields)
+      --         in foldr (\f inner -> PFun1 Nothing (identToVar f) inner) body fields
+      --   in pure createFn
 
-      valueToPHP' _ x = error $ "Unknown " <> show x
+      -- valueToPHP' _ x = error $ "Unknown " <> show x
 
-      iife exprs = PApp (PFun0 Nothing (PBlock exprs)) []
+      iife exprs = error "iife" -- PApp (PFun0 Nothing (PBlock exprs)) []
 
       constructorLiteral name args = error "Constructor"
 
@@ -350,10 +614,12 @@ moduleToPHP env (Module _ _ mn _ _ declaredExports foreigns decls) = -- foreignE
       literalToValuePHP = literalToValuePHP' valueToPHP
 
       literalToValuePHP' :: (a -> m PHP) -> Literal a -> m PHP
-      literalToValuePHP' _ (NumericLiteral n) = return $ PNumericLiteral n
-      literalToValuePHP' _ (StringLiteral s) = return $ PStringLiteral s
-      literalToValuePHP' _ (CharLiteral c) = return $ PStringLiteral (fromString [c])
-      literalToValuePHP' f (ArrayLiteral xs) = PArrayLiteral <$> mapM f xs
-      literalToValuePHP' f (ObjectLiteral ps) = do
-         pairs <- mapM (sndM f) ps
-         pure $ PAssociativeArrayLiteral pairs
+      literalToValuePHP' _ _ = error "LiteralToValuePHP'"
+      -- literalToValuePHP' _ (NumericLiteral n) = return $ PNumericLiteral n
+      -- literalToValuePHP' _ (StringLiteral s) = return $ PStringLiteral s
+      -- literalToValuePHP' _ (CharLiteral c) = return $ PStringLiteral (fromString [c])
+      -- literalToValuePHP' f (ArrayLiteral xs) = PArrayLiteral <$> mapM f xs
+      -- literalToValuePHP' f (ObjectLiteral ps) = do
+      --    pairs <- mapM (sndM f) ps
+      --    pure $ PAssociativeArrayLiteral pairs
+-}

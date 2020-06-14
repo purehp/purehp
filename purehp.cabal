@@ -43,7 +43,7 @@ library
       Paths_purehp
   hs-source-dirs:
       src
-  default-extensions: ConstraintKinds DataKinds DeriveFunctor DeriveFoldable DeriveTraversable DeriveGeneric DerivingStrategies EmptyDataDecls FlexibleContexts KindSignatures LambdaCase MultiParamTypeClasses NoImplicitPrelude PatternGuards RankNTypes RecordWildCards OverloadedStrings ScopedTypeVariables TupleSections ViewPatterns
+  default-extensions: ConstraintKinds DataKinds DeriveFunctor DeriveFoldable DeriveTraversable DeriveGeneric DerivingStrategies EmptyDataDecls FlexibleContexts KindSignatures LambdaCase MultiParamTypeClasses NoImplicitPrelude PatternGuards RecordWildCards ScopedTypeVariables TupleSections ViewPatterns
   ghc-options: -Wall -O2
   build-tools:
       happy

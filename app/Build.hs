@@ -58,7 +58,6 @@ compile BuildOptions{..} = do
       let extern = replaceFileName corefn "externs.cbor"
       res <- readJSONFile corefn
       resExterns <- MM.readExternsFile extern
-      -- resExterns <- MM.readCborFile extern
       case res >>= parseMaybe CoreFn.moduleFromJSON of
           Just (_version, module') -> do
             foreignFile <- liftIO $ inferForeignModule $ CoreFn.modulePath module'

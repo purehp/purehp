@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TypeFamilies               #-}
 module Language.PureScript.PHP.Make.Monad
   ( -- * Implementation of Make API using files on disk
@@ -22,8 +23,8 @@ module Language.PureScript.PHP.Make.Monad
 
 import           Prelude
 
-import           Codec.Serialise (Serialise)
-import qualified Codec.Serialise as Serialise
+import           Codec.Serialise                      (Serialise)
+import qualified Codec.Serialise                      as Serialise
 import           Control.Exception                    (fromException, tryJust)
 import           Control.Monad                        (guard, join)
 import           Control.Monad.Base                   (MonadBase (..))
@@ -42,7 +43,7 @@ import qualified Data.Text                            as Text
 import           Data.Time.Clock                      (UTCTime)
 import           Language.PureScript.Externs          (ExternsFile,
                                                        externsIsCurrentVersion)
-import           Language.PureScript.Make.Cache (ContentHash, hash)
+import           Language.PureScript.Make.Cache       (ContentHash, hash)
 import           Language.PureScript.Options
 import           Language.PureScript.PHP.Errors
 import           Language.PureScript.PHP.Errors.Types

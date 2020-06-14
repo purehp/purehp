@@ -1,22 +1,29 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- |
 -- Common code generation utility functions
 --
 module Language.PureScript.PHP.CodeGen.Common where
 
-import Data.Char
-import Data.Text (Text)
-import qualified Data.Text as T
+import           Prelude.Compat
 
-import Language.PureScript.Crash
-import Language.PureScript.Names
+import           Data.Char
+import           Data.Text                 (Text)
+import qualified Data.Text                 as T
 
+import           Language.PureScript.Crash
+import           Language.PureScript.Names
+
+-- | A prefix for invalid names.
+phpPrefix :: Text
+phpPrefix = "__"
 
 -- | Creates a PHP module name
--- TODO: check that prefix thing
+-- TODO: we should separate between "namespace" module name and "file" module name
+-- Also Add some kind of prefix for Foreign Modules.
 moduleNameToPHP :: ModuleName -> Text
-moduleNameToPHP (ModuleName pns) =
-  let name = T.intercalate "\\" (runProperName `map` pns)
-  in if nameIsPHPBuiltIn name then "__" <> name else name
+moduleNameToPHP (ModuleName mn) =
+  let name = T.replace "." "\\" mn
+  in if nameIsPHPBuiltIn name then phpPrefix <> name else name
 
 -- | Convert an 'Ident' into a valid PHP identifier:
 --
@@ -24,9 +31,9 @@ moduleNameToPHP (ModuleName pns) =
 --
 -- * Reserved php identifiers are prefixed with '__'
 identToPHP :: Ident -> Text
-identToPHP (Ident name) = anyNameToPHP name
+identToPHP (Ident name)   = anyNameToPHP name
 identToPHP (GenIdent _ _) = internalError "GenIdent in identToPHP"
-identToPHP UnusedIdent = "$__unused"
+identToPHP UnusedIdent    = "$__unused"
 
 -- | Convert a 'ProperName' into a valid JavaScript identifier:
 --
@@ -44,7 +51,7 @@ properToPHP = anyNameToPHP . runProperName
 -- with a digit. Prefer 'identToPHP' or 'properToPHP' where possible.
 anyNameToPHP :: Text -> Text
 anyNameToPHP name
-  | nameIsPHPReseved name || nameIsPHPBuiltIn name = "__" <> name
+  | nameIsPHPReserved name || nameIsPHPBuiltIn name = phpPrefix <> name
   | otherwise = T.concatMap identCharToText name
 
 -- | Test if a string is a valid PHP identifier as-is. Note that, while
@@ -53,7 +60,7 @@ anyNameToPHP name
 -- not a valid PHP identifier. That is, this check is more conservative than
 -- absolutely necessary.
 isValidPHPIdentifier :: Text -> Bool
-isvalidPHPIdentifier s =
+isValidPHPIdentifier s =
   and
     [ not (T.null s)
     , isAlpha (T.head s)

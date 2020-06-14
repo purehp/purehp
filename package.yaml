@@ -65,9 +65,7 @@ library:
     - MultiParamTypeClasses
     - NoImplicitPrelude
     - PatternGuards
-    - RankNTypes
     - RecordWildCards
-    - OverloadedStrings
     - ScopedTypeVariables
     - TupleSections
     - ViewPatterns

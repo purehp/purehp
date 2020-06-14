@@ -17,34 +17,34 @@ import Language.PureScript.Traversals
 -- | Built-in unary operators
 -- Copying js for now
 data UnaryOperator
-  = Negate
-  | Not
-  | BitwiseNot
-  | Positive
-  | New
+  = PNegate
+  | PNot
+  | PBitwiseNot
+  | PPositive
+  | PNew
   deriving (Show, Eq)
 
 -- | Built-in binary operators
 -- Copying js for now
 data BinaryOperator
-  = Add
-  | Subtract
-  | Multiply
-  | Modulus
-  | EqualsTo
-  | NotEqualTo
-  | LessThan
-  | LessThanOrEqualTo
-  | GreaterThan
-  | GreaterThanOrEqualTo
-  | And
-  | Or
-  | BitwiseAnd
-  | BitwiseOr
-  | BitwiseXor
-  | ShiftLeft
-  | ShiftRight
-  | ZeroFillShiftRight
+  = PAdd
+  | PSubtract
+  | PMultiply
+  | PModulus
+  | PEqualsTo
+  | PNotEqualTo
+  | PLessThan
+  | PLessThanOrEqualTo
+  | PGreaterThan
+  | PGreaterThanOrEqualTo
+  | PAnd
+  | POr
+  | PBitwiseAnd
+  | PBitwiseOr
+  | PBitwiseXor
+  | PShiftLeft
+  | PShiftRight
+  | PZeroFillShiftRight
   deriving (Show, Eq)
 
 data PHP
@@ -62,7 +62,7 @@ data PHP
   -- ^ An array literal
   | PIndexer (Maybe SourceSpan) PHP PHP
   -- ^ An array indexer expression
-  | PClassLiteral (Maybe SourceSpan) Text [(PSString, PHP)]
+  | PObjectLiteral (Maybe SourceSpan) [PHP] -- [(PSString, PHP)]
   -- ^ A class literal (for records?), the text is to store the name. tbd
   | PFunction (Maybe SourceSpan) (Maybe Text) [Text] PHP
   -- ^ A function introduction (optional name, arguments, body)
@@ -74,6 +74,8 @@ data PHP
   -- ^ A block of expressions in braces
   | PVariableIntroduction (Maybe SourceSpan) Text (Maybe PHP)
   -- ^ A variable introduction and optional initialization
+  | PClassVariableIntroduction (Maybe SourceSpan) Text (Maybe PHP)
+  -- ^ A class variable introduction
   | PAssignment (Maybe SourceSpan) PHP PHP
   -- ^ A variable assignment
   -- while
@@ -103,12 +105,13 @@ withSourceSpan withSpan = go where
   go (PBinary _ op j1 j2) = PBinary ss op j1 j2
   go (PArrayLiteral _ js) = PArrayLiteral ss js
   go (PIndexer _ j1 j2) = PIndexer ss j1 j2
-  go (PClassLiteral _ n js) = PClassLiteral ss n js
+  go (PObjectLiteral _ js) = PObjectLiteral ss js
   go (PFunction _ name args j) = PFunction ss name args j
   go (PApp _ j js) = PApp ss j js
   go (PVar _ s) = PVar ss s
   go (PBlock _ js) = PBlock ss js
   go (PVariableIntroduction _ name j) = PVariableIntroduction ss name j
+  go (PClassVariableIntroduction _ name j) = PClassVariableIntroduction ss name j
   go (PAssignment _ j1 j2) = PAssignment ss j1 j2
   -- go (While _ j1 j2) = While ss j1 j2
   -- go (For _ name j1 j2 j3) = For ss name j1 j2 j3
@@ -131,12 +134,13 @@ getSourceSpan = go where
   go (PBinary ss _ _ _) = ss
   go (PArrayLiteral ss _) = ss
   go (PIndexer ss _ _) = ss
-  go (PClassLiteral ss _ _) = ss
+  go (PObjectLiteral ss  _) = ss
   go (PFunction ss _ _ _) = ss
   go (PApp ss _ _) = ss
   go (PVar ss _) = ss
   go (PBlock ss _) = ss
   go (PVariableIntroduction ss _ _) = ss
+  go (PClassVariableIntroduction ss _ _) = ss
   go (PAssignment ss _ _) = ss
   -- go (While ss _ _) = ss
   -- go (For ss _ _ _ _) = ss
@@ -156,11 +160,12 @@ everywhere f = go where
   go (PBinary ss op j1 j2) = f (PBinary ss op (go j1) (go j2))
   go (PArrayLiteral ss js) = f (PArrayLiteral ss (map go js))
   go (PIndexer ss j1 j2) = f (PIndexer ss (go j1) (go j2))
-  go (PClassLiteral ss n js) = f (PClassLiteral ss n (map (fmap go) js))
+  go (PObjectLiteral ss js) = f (PObjectLiteral ss (map go js)) -- (map (fmap go) js))
   go (PFunction ss name args j) = f (PFunction ss name args (go j))
   go (PApp ss j js) = f (PApp ss (go j) (map go js))
   go (PBlock ss js) = f (PBlock ss (map go js))
   go (PVariableIntroduction ss name j) = f (PVariableIntroduction ss name (fmap go j))
+  go (PClassVariableIntroduction ss name j) = f (PClassVariableIntroduction ss name (fmap go j))
   go (PAssignment ss j1 j2) = f (PAssignment ss (go j1) (go j2))
   -- go (While ss j1 j2) = f (While ss (go j1) (go j2))
   -- go (For ss name j1 j2 j3) = f (For ss name (go j1) (go j2) (go j3))
@@ -182,11 +187,12 @@ everywhereTopDownM f = f >=> go where
   go (PBinary ss op j1 j2) = PBinary ss op <$> f' j1 <*> f' j2
   go (PArrayLiteral ss js) = PArrayLiteral ss <$> traverse f' js
   go (PIndexer ss j1 j2) = PIndexer ss <$> f' j1 <*> f' j2
-  go (PClassLiteral ss n js) = PClassLiteral ss n <$> traverse (sndM f') js
+  go (PObjectLiteral ss js) = PObjectLiteral ss <$> traverse f' js -- traverse (sndM f') js
   go (PFunction ss name args j) = PFunction ss name args <$> f' j
   go (PApp ss j js) = PApp ss <$> f' j <*> traverse f' js
   go (PBlock ss js) = PBlock ss <$> traverse f' js
   go (PVariableIntroduction ss name j) = PVariableIntroduction ss name <$> traverse f' j
+  go (PClassVariableIntroduction ss name j) = PClassVariableIntroduction ss name <$> traverse f' j
   go (PAssignment ss j1 j2) = PAssignment ss <$> f' j1 <*> f' j2
   -- go (While ss j1 j2) = While ss <$> f' j1 <*> f' j2
   -- go (For ss name j1 j2 j3) = For ss name <$> f' j1 <*> f' j2 <*> f' j3
@@ -204,11 +210,12 @@ everything (<>.) f = go where
   go j@(PBinary _ _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PArrayLiteral _ js) = foldl (<>.) (f j) (map go js)
   go j@(PIndexer _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(PClassLiteral _ _ js) = foldl (<>.) (f j) (map (go . snd) js)
+  go j@(PObjectLiteral _ js) = foldl (<>.) (f j) (map go js) -- (map (go . snd) js)
   go j@(PFunction _ _ _ j1) = f j <>. go j1
   go j@(PApp _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
   go j@(PBlock _ js) = foldl (<>.) (f j) (map go js)
   go j@(PVariableIntroduction _ _ (Just j1)) = f j <>. go j1
+  go j@(PClassVariableIntroduction _ _ (Just j1)) = f j <>. go j1
   go j@(PAssignment _ j1 j2) = f j <>. go j1 <>. go j2
   -- go j@(While _ j1 j2) = f j <>. go j1 <>. go j2
   -- go j@(For _ _ j1 j2 j3) = f j <>. go j1 <>. go j2 <>. go j3
