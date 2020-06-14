@@ -2,11 +2,28 @@ module Main where
 
 -- import Prelude
 
-_int :: Int
-_int = 5
+int1 :: Int
+int1 = 5
 
-_int2 :: Int
-_int2 = _int
+int2 :: Int
+int2 = int1
+
+string1 :: String
+string1 = "Hello World!"
+
+char1 :: Char
+char1 = 'C'
+
+array1 :: Array Int
+array1 = [1, 2, 3, 4]
+
+fun1 :: Int -> Int
+fun1 arg = arg
+
+-- data Unit = Unit
+
+-- data Unit = Unit
+
 
 -- _string :: String
 -- _string = "Hello World!"
