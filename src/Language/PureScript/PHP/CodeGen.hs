@@ -250,7 +250,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         ret <- mapM (sndM (`valueToPHP` i)) ps
         -- TODO this fromMaybe shouldn't be here. i think I'm doing something wrong
         let fields :: [PHP]
-            fields = map (\(i', p) -> PClassVariableIntroduction (Just ss) (fromMaybe "" $ decodeString i') (Just p)) ret
+            fields = map (\(i', p) -> PAssociativeArrayField (Just ss) (fromMaybe "" $ decodeString i') p) ret
         return $ PObjectLiteral (Just ss) fields
         -- let fs = map (\(s, p) -> PClassVariableIntroduction Nothing (fromMaybe "" $ decodeString s) (Just p)) ps
         -- return $ PObjectLiteral (Just ss) fs

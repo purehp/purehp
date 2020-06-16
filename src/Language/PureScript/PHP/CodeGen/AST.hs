@@ -60,6 +60,8 @@ data PHP
   -- ^ A binary operator application
   | PArrayLiteral (Maybe SourceSpan) [PHP]
   -- ^ An array literal
+  | PAssociativeArrayField (Maybe SourceSpan) Text PHP
+  -- ^ A field declaration for an associative array
   | PIndexer (Maybe SourceSpan) PHP PHP
   -- ^ An array indexer expression
   | PObjectLiteral (Maybe SourceSpan) [PHP] -- [(PSString, PHP)]
@@ -104,6 +106,7 @@ withSourceSpan withSpan = go where
   go (PUnary _ op j) = PUnary ss op j
   go (PBinary _ op j1 j2) = PBinary ss op j1 j2
   go (PArrayLiteral _ js) = PArrayLiteral ss js
+  go (PAssociativeArrayField _ n v) = PAssociativeArrayField ss n v
   go (PIndexer _ j1 j2) = PIndexer ss j1 j2
   go (PObjectLiteral _ js) = PObjectLiteral ss js
   go (PFunction _ name args j) = PFunction ss name args j
@@ -133,6 +136,7 @@ getSourceSpan = go where
   go (PUnary ss _ _) = ss
   go (PBinary ss _ _ _) = ss
   go (PArrayLiteral ss _) = ss
+  go (PAssociativeArrayField ss _ _) = ss
   go (PIndexer ss _ _) = ss
   go (PObjectLiteral ss  _) = ss
   go (PFunction ss _ _ _) = ss
