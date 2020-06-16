@@ -37,9 +37,9 @@ literals = mkPattern' match'
     match (PBooleanLiteral _ True) = return $ emit "true"
     match (PBooleanLiteral _ False) = return $ emit "false"
     match (PArrayLiteral _ xs) = mconcat <$> sequence
-      [ return $ emit "array( "
+      [ return $ emit "["
       , intercalate (emit ", ") <$> forM xs prettyPrintPHP'
-      , return $ emit " )"
+      , return $ emit "]"
       ]
     match (PBlock _ sts) = mconcat <$> sequence
       [ return $ emit "{\n"
