@@ -23,9 +23,9 @@ fun1 arg = arg
 rec1 :: { x :: Int, y :: String, z :: Int -> Int }
 rec1 = { x: 1, y: "Hello", z: \x -> x }
 
--- newtype Foo = Foo Int
+newtype Foo = Foo Int
 
--- data Bar = A Int | B String | C
+data Bar = A Int | B String | C
 
 -- data Foo = Foo Int
 

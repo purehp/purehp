@@ -229,10 +229,16 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       valueToPHP' (Var _ ident) _ = return $ varToPHP ident
 
-      -- valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
-      --   return $ PVariableIntroduction Nothing (properToPHP ctor) (Just $
-      --              PObject
-      --   )
+      valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) _ =
+        error "Constructor isnewtype"
+        -- return $ PVariableIntroduction Nothing (properToPHP ctor) (Just $
+        --            PObjectLiteral Nothing [("create",
+        --                 PFunction Nothing Nothing ["value"]
+        --                 (PBlock Nothing [PReturn Nothing $ PVar Nothing "value"]))])
+      valueToPHP' (Constructor _ _ ctor []) _ =
+        error "Empty constructor"
+      valueToPHP' (Constructor _ _ ctor fields) _ =
+        error "Constructor with fields"
 
 
       valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
