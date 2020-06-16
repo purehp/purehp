@@ -14,7 +14,7 @@
 This could be done with spago too, but it will also compile all the dependencies and purehp right now is not able to handle them.
 
 e.g.
-- `spago build -u '--codegen corefn'
+- `spago build -u '--codegen corefn'`
 
 
 
