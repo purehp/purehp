@@ -41,6 +41,11 @@ literals = mkPattern' match'
       , intercalate (emit ", ") <$> forM xs prettyPrintPHP'
       , return $ emit "]"
       ]
+    match (PAssociativeArrayField _ n v) = mconcat <$> sequence
+      [ return $ emit $ "'" <> n <> "'"
+      , return $ emit " => "
+      , prettyPrintPHP' v
+      ]
     match (PBlock _ sts) = mconcat <$> sequence
       [ return $ emit "{\n"
       , withIndent $ prettyStatements sts
@@ -114,7 +119,7 @@ prettyPrintPHP = maybe (internalError "Incomplete pattern") runPlainString . fli
 recr :: Pattern PrinterState PHP (Maybe SourceSpan, PHP)
 recr = mkPattern match
   where
-    match (PObjectLiteral ss fields) = Just (ss, PBlock ss fields)
+    match (PObjectLiteral ss fields) = Just (ss, PArrayLiteral ss fields)
     match _ = Nothing
 
 lam :: Pattern PrinterState PHP ((Maybe Text, [Text], Maybe SourceSpan), PHP)
@@ -139,7 +144,7 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
             <> ret
         ]
       , [ Wrap recr $ \ss fields -> addMapping' ss <>
-          emit "new class "
+          emit "(object) "
             <> fields
          ]
       ]
