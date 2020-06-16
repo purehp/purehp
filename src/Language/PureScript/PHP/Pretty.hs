@@ -55,7 +55,7 @@ literals = mkPattern' match'
       ]
     match (PClassVariableIntroduction _ ident value) = mconcat <$> sequence
       [ return $ emit $ "var $" <> ident
-      , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintPHP') value 
+      , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintPHP') value
       ]
     match (PAssignment _ target value) = mconcat <$> sequence
       [ prettyPrintPHP' target
@@ -67,7 +67,7 @@ literals = mkPattern' match'
       , prettyPrintPHP' value
       ]
     match (PReturnNoResult _) = return $ emit "return"
-    match (PComment _ com php) = mconcat <$> sequence 
+    match (PComment _ com php) = mconcat <$> sequence
       [ return $ emit "\n"
       , mconcat <$> forM com comment
       , prettyPrintPHP' php
@@ -75,7 +75,7 @@ literals = mkPattern' match'
     match _ = mzero
 
     comment :: (Emit gen) => Comment -> StateT PrinterState Maybe gen
-    comment (LineComment com) = fmap mconcat $ sequence $ 
+    comment (LineComment com) = fmap mconcat $ sequence
       [ currentIndent
       , return $ emit "//" <> emit com <> emit "\n"
       ]
@@ -84,9 +84,9 @@ literals = mkPattern' match'
       , return $ emit "/**\n"
       ] ++
       map asLine (T.lines com) ++
-      [ currentIndent 
+      [ currentIndent
       , return $ emit " *\n"
-      , currentIndent 
+      , currentIndent
       ]
       where
         asLine :: (Emit gen) => Text -> StateT PrinterState Maybe gen
@@ -114,7 +114,7 @@ prettyPrintPHP = maybe (internalError "Incomplete pattern") runPlainString . fli
 recr :: Pattern PrinterState PHP (Maybe SourceSpan, PHP)
 recr = mkPattern match
   where
-    match (PObjectLiteral ss fields) = Just (ss, PBlock ss fields) 
+    match (PObjectLiteral ss fields) = Just (ss, PBlock ss fields)
     match _ = Nothing
 
 lam :: Pattern PrinterState PHP ((Maybe Text, [Text], Maybe SourceSpan), PHP)
@@ -130,13 +130,13 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
     matchValue :: (Emit gen) => Pattern PrinterState PHP gen
     matchValue = buildPrettyPrinter operators (literals <+> fmap parensPos matchValue)
     operators :: (Emit gen) => OperatorTable PrinterState PHP gen
-    operators = 
+    operators =
       OperatorTable [
         [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
           emit ("function "
             <> fromMaybe "" name
-            <> "( " <> intercalate ", " args <> " ) ")
-            <> ret 
+            <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
+            <> ret
         ]
       , [ Wrap recr $ \ss fields -> addMapping' ss <>
           emit "new class "
