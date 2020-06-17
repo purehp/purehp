@@ -46,14 +46,19 @@ literals = mkPattern' match'
       , return $ emit " => "
       , prettyPrintPHP' v
       ]
-    match (PBlock _ sts) = mconcat <$> sequence
+    match (PBlock _ True sts) = mconcat <$> sequence
       [ return $ emit "{\n"
       , withIndent $ prettyStatements sts
       , return $ emit "\n"
       , currentIndent
       , return $ emit "}"
       ]
+    match (PBlock _ False sts) = mconcat <$> sequence
+      [ return $ emit "\n"
+      , withIndent $ prettyStatements sts
+      ]
     match (PVar _ ident) = return $ emit $ "$" <> ident
+    match (PVar' _ ident) = return $ emit ident
     match (PVariableIntroduction _ ident value) = mconcat <$> sequence
       [ return $ emit $ "$" <> ident
       , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintPHP') value
@@ -118,7 +123,19 @@ class_ :: Pattern PrinterState PHP ((Text, Maybe SourceSpan), PHP)
 class_ = mkPattern match
   where
     match (PClass ss name ret) = Just ((name, ss), ret)
-    match _ = traceShowId Nothing
+    match _ = Nothing
+
+met :: Pattern PrinterState PHP (([Text], Text, [Text], Maybe SourceSpan), PHP)
+met = mkPattern match
+  where
+    match (PMethod ss pre name args ret) = Just ((pre, name, args, ss), ret)
+    match _ = mzero
+
+arr :: Pattern PrinterState PHP (([Text], Maybe SourceSpan), PHP)
+arr = mkPattern match
+  where
+    match (PArrowFunction ss args ret) = Just ((args, ss), ret)
+    match _ = Nothing
 
 accessor :: Pattern PrinterState PHP (Text, PHP)
 accessor = mkPattern match
@@ -183,10 +200,20 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
             emit "(object) "
               <> fields ]
         , [ Wrap class_ $ \(name, ss) ret -> addMapping' ss <>
-            emit ("class " <> name)
+            emit ("class " <> name <> " ")
+              <> ret ]
+        , [ Wrap met $ \(pre, name, args, ss) ret -> addMapping' ss <>
+            emit (T.unwords pre
+              <> " function "
+              <> name
+              <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
+              <> ret ]
+        , [ Wrap arr $ \(args, ss) ret -> addMapping' ss <>
+            emit ("fn("
+              <> intercalate ", " (("$" <>) <$> args) <> ") => ")
               <> ret ]
         , [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
-        , [ Wrap accessor $ \prop val -> val <> emit "." <> emit prop ]
+        , [ Wrap accessor $ \prop val -> val <> emit "->" <> emit prop ]
         , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
         , [ unary PNew "new" ]
         , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>

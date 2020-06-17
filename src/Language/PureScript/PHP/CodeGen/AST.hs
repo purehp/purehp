@@ -68,6 +68,9 @@ data PHP
   -- ^ Object literal for records.
   | PClass (Maybe SourceSpan) Text PHP
   -- ^ A class for data constructors.
+  | PMethod (Maybe SourceSpan) [Text] Text [Text] PHP
+  -- ^ A class method (prefixes e.g. visibility, name, args, body)
+  -- TODO: use data type instead of text, NonEmptyList or fixed args?
   | PFunction (Maybe SourceSpan) (Maybe Text) [Text] PHP
   -- ^ A function introduction (optional name, arguments, body)
   | PArrowFunction (Maybe SourceSpan) [Text] PHP
@@ -76,8 +79,10 @@ data PHP
   -- ^ Function application
   | PVar (Maybe SourceSpan) Text
   -- ^ Variable
-  | PBlock (Maybe SourceSpan) [PHP]
-  -- ^ A block of expressions in braces
+  | PVar' (Maybe SourceSpan) Text
+  -- ^ A variable without the `$` prefix
+  | PBlock (Maybe SourceSpan) Bool [PHP]
+  -- ^ A block of expressions with a bool indicating whether it requires braces
   | PVariableIntroduction (Maybe SourceSpan) Text (Maybe PHP)
   -- ^ A variable introduction and optional initialization
   | PClassVariableIntroduction (Maybe SourceSpan) Text (Maybe PHP)
@@ -116,7 +121,8 @@ withSourceSpan withSpan = go where
   go (PFunction _ name args j) = PFunction ss name args j
   go (PApp _ j js) = PApp ss j js
   go (PVar _ s) = PVar ss s
-  go (PBlock _ js) = PBlock ss js
+  go (PVar' _ s) = PVar' ss s
+  go (PBlock _ b js) = PBlock ss b js
   go (PVariableIntroduction _ name j) = PVariableIntroduction ss name j
   go (PClassVariableIntroduction _ name j) = PClassVariableIntroduction ss name j
   go (PAssignment _ j1 j2) = PAssignment ss j1 j2
@@ -146,7 +152,8 @@ getSourceSpan = go where
   go (PFunction ss _ _ _) = ss
   go (PApp ss _ _) = ss
   go (PVar ss _) = ss
-  go (PBlock ss _) = ss
+  go (PVar' ss _) = ss
+  go (PBlock ss _ _) = ss
   go (PVariableIntroduction ss _ _) = ss
   go (PClassVariableIntroduction ss _ _) = ss
   go (PAssignment ss _ _) = ss
@@ -171,7 +178,7 @@ everywhere f = go where
   go (PObjectLiteral ss js) = f (PObjectLiteral ss (map go js)) -- (map (fmap go) js))
   go (PFunction ss name args j) = f (PFunction ss name args (go j))
   go (PApp ss j js) = f (PApp ss (go j) (map go js))
-  go (PBlock ss js) = f (PBlock ss (map go js))
+  go (PBlock ss b js) = f (PBlock ss b (map go js))
   go (PVariableIntroduction ss name j) = f (PVariableIntroduction ss name (fmap go j))
   go (PClassVariableIntroduction ss name j) = f (PClassVariableIntroduction ss name (fmap go j))
   go (PAssignment ss j1 j2) = f (PAssignment ss (go j1) (go j2))
@@ -198,7 +205,7 @@ everywhereTopDownM f = f >=> go where
   go (PObjectLiteral ss js) = PObjectLiteral ss <$> traverse f' js -- traverse (sndM f') js
   go (PFunction ss name args j) = PFunction ss name args <$> f' j
   go (PApp ss j js) = PApp ss <$> f' j <*> traverse f' js
-  go (PBlock ss js) = PBlock ss <$> traverse f' js
+  go (PBlock ss b js) = PBlock ss b <$> traverse f' js
   go (PVariableIntroduction ss name j) = PVariableIntroduction ss name <$> traverse f' j
   go (PClassVariableIntroduction ss name j) = PClassVariableIntroduction ss name <$> traverse f' j
   go (PAssignment ss j1 j2) = PAssignment ss <$> f' j1 <*> f' j2
@@ -221,7 +228,7 @@ everything (<>.) f = go where
   go j@(PObjectLiteral _ js) = foldl (<>.) (f j) (map go js) -- (map (go . snd) js)
   go j@(PFunction _ _ _ j1) = f j <>. go j1
   go j@(PApp _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
-  go j@(PBlock _ js) = foldl (<>.) (f j) (map go js)
+  go j@(PBlock _ _ js) = foldl (<>.) (f j) (map go js)
   go j@(PVariableIntroduction _ _ (Just j1)) = f j <>. go j1
   go j@(PClassVariableIntroduction _ _ (Just j1)) = f j <>. go j1
   go j@(PAssignment _ j1 j2) = f j <>. go j1 <>. go j2
