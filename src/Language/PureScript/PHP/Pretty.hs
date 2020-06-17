@@ -107,6 +107,60 @@ literals = mkPattern' match'
               Just (x, xs) -> x `T.cons` removeComments xs
               Nothing -> ""
 
+
+recr :: Pattern PrinterState PHP (Maybe SourceSpan, PHP)
+recr = mkPattern match
+  where
+    match (PObjectLiteral ss fields) = Just (ss, PArrayLiteral ss fields)
+    match _ = Nothing
+
+class_ :: Pattern PrinterState PHP ((Text, Maybe SourceSpan), PHP)
+class_ = mkPattern match
+  where
+    match (PClass ss name ret) = Just ((name, ss), ret)
+    match _ = traceShowId Nothing
+
+accessor :: Pattern PrinterState PHP (Text, PHP)
+accessor = mkPattern match
+  where
+    match (PIndexer _ (PStringLiteral _ prop) val) =
+      case decodeString prop of
+        Just s | isValidPHPIdentifier s -> Just (s, val)
+        _ -> Nothing
+    match _ = Nothing
+
+indexer :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
+indexer = mkPattern' match
+  where
+    match (PIndexer _ index val) = (,) <$> prettyPrintPHP' index <*> pure val
+    match _ = mzero
+
+lam :: Pattern PrinterState PHP ((Maybe Text, [Text], Maybe SourceSpan), PHP)
+lam = mkPattern match
+  where
+    match (PFunction ss name args ret) = Just ((name, args, ss), ret)
+    match _ = Nothing
+
+app :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
+app = mkPattern' match
+  where
+    match (PApp _ val args) = do
+      php <- traverse prettyPrintPHP' args
+      return (intercalate (emit ", ") php, val)
+    match _ = mzero
+
+unary' :: (Emit gen) => UnaryOperator -> (PHP -> Text) -> Operator PrinterState PHP gen
+unary' op mkStr = Wrap match (<>)
+  where
+    match :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
+    match = mkPattern match'
+      where
+        match' (PUnary _ op' val) | op' == op = Just (emit $ mkStr val, val)
+        match' _ = Nothing
+
+unary :: (Emit gen) => UnaryOperator -> Text -> Operator PrinterState PHP gen
+unary op str = unary' op (const str)
+
 prettyStatements :: (Emit gen) => [PHP] -> StateT PrinterState Maybe gen
 prettyStatements sts = do
   php <- forM sts prettyPrintPHP'
@@ -116,18 +170,6 @@ prettyStatements sts = do
 prettyPrintPHP :: [PHP] -> Text
 prettyPrintPHP = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
 
-recr :: Pattern PrinterState PHP (Maybe SourceSpan, PHP)
-recr = mkPattern match
-  where
-    match (PObjectLiteral ss fields) = Just (ss, PArrayLiteral ss fields)
-    match _ = Nothing
-
-lam :: Pattern PrinterState PHP ((Maybe Text, [Text], Maybe SourceSpan), PHP)
-lam = mkPattern match
-  where
-    match (PFunction ss name args ret) = Just ((name, args, ss), ret)
-    match _ = Nothing
-
 -- | Generate an indented, pretty-printed string representing a PHP expression
 prettyPrintPHP' :: (Emit gen) => PHP -> StateT PrinterState Maybe gen
 prettyPrintPHP' = A.runKleisli (runPattern matchValue)
@@ -136,17 +178,22 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
     matchValue = buildPrettyPrinter operators (literals <+> fmap parensPos matchValue)
     operators :: (Emit gen) => OperatorTable PrinterState PHP gen
     operators =
-      OperatorTable [
-        [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
-          emit ("function "
-            <> fromMaybe "" name
-            <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
-            <> ret
-        ]
-      , [ Wrap recr $ \ss fields -> addMapping' ss <>
-          emit "(object) "
-            <> fields
-         ]
+      OperatorTable
+        [ [ Wrap recr $ \ss fields -> addMapping' ss <>
+            emit "(object) "
+              <> fields ]
+        , [ Wrap class_ $ \(name, ss) ret -> addMapping' ss <>
+            emit ("class " <> name)
+              <> ret ]
+        , [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
+        , [ Wrap accessor $ \prop val -> val <> emit "." <> emit prop ]
+        , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
+        , [ unary PNew "new" ]
+        , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
+            emit ("function "
+              <> fromMaybe "" name
+              <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
+              <> ret ]
       ]
 
 {-

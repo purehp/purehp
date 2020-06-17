@@ -2,30 +2,41 @@ module Main where
 
 -- import Prelude
 
-int1 :: Int
-int1 = 5
+-- int1 :: Int
+-- int1 = 5
 
-int2 :: Int
-int2 = int1
+-- int2 :: Int
+-- int2 = int1
 
-string1 :: String
-string1 = "Hello World!"
+-- string1 :: String
+-- string1 = "Hello World!"
 
-char1 :: Char
-char1 = 'C'
+-- char1 :: Char
+-- char1 = 'C'
 
-array1 :: Array Int
-array1 = [1, 2, 3, 4]
+-- array1 :: Array Int
+-- array1 = [1, 2, 3, 4]
 
-fun1 :: Int -> Int
-fun1 arg = arg
+-- fun1 :: Int -> Int
+-- fun1 arg = arg
 
-rec1 :: { x :: Int, y :: String, z :: Int -> Int }
-rec1 = { x: 1, y: "Hello", z: \x -> x }
+-- rec1 :: { x :: Int, y :: String, z :: Int -> Int }
+-- rec1 = { x: 1, y: "Hello", z: \x -> x }
 
-newtype Foo = Foo Int
+-- newtype Foo = Foo Int
 
-data Bar = A Int | B String | C
+data B = B Int Int
+
+-- data Bar = A Int | B Int String | C
+
+-- barApp1 :: Bar
+-- barApp1 = A 10
+
+-- barApp2 :: Bar
+-- barApp2 = B 3 "Hello"
+
+-- barApp3 :: Bar
+-- barApp3 = C
 
 -- data Foo = Foo Int
 

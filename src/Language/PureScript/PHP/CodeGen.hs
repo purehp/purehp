@@ -176,6 +176,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             if withoutComment
               then nonRecToPHP a i (modifyAnn removeComments e)
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
+      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ _) = do
+        php <- valueToPHP val ident
+        withPos ss $ php
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val ident
         withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
@@ -237,12 +240,24 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         --                 (PBlock Nothing [PReturn Nothing $ PVar Nothing "value"]))])
       valueToPHP' (Constructor _ _ ctor []) _ =
         error "Empty constructor"
-      valueToPHP' (Constructor _ _ ctor fields) _ =
-        error "Constructor with fields"
+      valueToPHP' (Constructor _ _ ctor fields) _ = do
+        traceM $ show fields
+        let vars = map (\v -> PClassVariableIntroduction Nothing (identToPHP v) Nothing) fields
+        return $ PClass Nothing (properToPHP ctor) (PBlock Nothing vars)
+        -- let constructor =
+        --       let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- fields ]
+        --       in PFunction Nothing (Just (properToPHP ctor)) (identToPHP `map` fields) (PBlock Nothing body)
+        --     createFn =
+        --       let body = PUnary Nothing PNew $ PApp Nothing (PVar Nothing (properToPHP ctor)) (var `map` fields)
+        --       in foldr (\f inner -> PFunction Nothing Nothing [identToPHP f] (PBlock Nothing [PReturn Nothing inner])) body fields
+        -- in return $ iife (properToPHP ctor) [ constructor
+        --                                    , PAssignment Nothing (accessorString "create" (PVar Nothing (properToPHP ctor))) createFn
+        --                                    ]
 
 
       valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
 
+      -- TODO: we probably don't need this
       iife :: Text -> [PHP] -> PHP
       iife v exprs = PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing $ exprs ++ [PReturn Nothing $ PVar Nothing v])) []
 

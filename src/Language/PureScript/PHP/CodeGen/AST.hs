@@ -65,9 +65,13 @@ data PHP
   | PIndexer (Maybe SourceSpan) PHP PHP
   -- ^ An array indexer expression
   | PObjectLiteral (Maybe SourceSpan) [PHP] -- [(PSString, PHP)]
-  -- ^ A class literal (for records?), the text is to store the name. tbd
+  -- ^ Object literal for records.
+  | PClass (Maybe SourceSpan) Text PHP
+  -- ^ A class for data constructors.
   | PFunction (Maybe SourceSpan) (Maybe Text) [Text] PHP
   -- ^ A function introduction (optional name, arguments, body)
+  | PArrowFunction (Maybe SourceSpan) [Text] PHP
+  -- ^ An arrow function
   | PApp (Maybe SourceSpan) PHP [PHP]
   -- ^ Function application
   | PVar (Maybe SourceSpan) Text
