@@ -61,20 +61,22 @@ literals = mkPattern' match'
     match (PVar' _ ident) = return $ emit ident
     match (PVariableIntroduction _ ident value) = mconcat <$> sequence
       [ return $ emit $ "$" <> ident
-      , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintPHP') value
+      , maybe (return $ emit ";") (fmap (\v -> emit " = " <> v <> emit ";") . prettyPrintPHP') value
       ]
     match (PClassVariableIntroduction _ ident value) = mconcat <$> sequence
       [ return $ emit $ "var $" <> ident
-      , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintPHP') value
+      , maybe (return $ emit ";") (fmap (\v -> emit " = " <> v <> emit ";") . prettyPrintPHP') value
       ]
     match (PAssignment _ target value) = mconcat <$> sequence
       [ prettyPrintPHP' target
       , return $ emit " = "
       , prettyPrintPHP' value
+      , return $ emit ";"
       ]
     match (PReturn _ value) = mconcat <$> sequence
       [ return $ emit "return "
       , prettyPrintPHP' value
+      , return $ emit ";"
       ]
     match (PReturnNoResult _) = return $ emit "return"
     match (PComment _ com php) = mconcat <$> sequence
@@ -182,7 +184,7 @@ prettyStatements :: (Emit gen) => [PHP] -> StateT PrinterState Maybe gen
 prettyStatements sts = do
   php <- forM sts prettyPrintPHP'
   indentString <- currentIndent
-  return $ intercalate (emit "\n") $ map ((<> emit ";") . (indentString <>)) php
+  return $ intercalate (emit "\n") $ map (indentString <>) php
 
 prettyPrintPHP :: [PHP] -> Text
 prettyPrintPHP = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
