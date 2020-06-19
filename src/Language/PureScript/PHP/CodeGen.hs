@@ -176,11 +176,12 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             if withoutComment
               then nonRecToPHP a i (modifyAnn removeComments e)
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
-      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ _) = do
-        php <- valueToPHP val ident
-        withPos ss $ php
+      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ fields)
+        | fields /= [] = do
+          php <- valueToPHP val
+          withPos ss php
       nonRecToPHP (ss, _, _, _) ident val = do
-        php <- valueToPHP val ident
+        php <- valueToPHP val
         withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
 
       withPos :: SourceSpan -> PHP -> m PHP
@@ -207,62 +208,64 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       accessorString prop = PIndexer Nothing (PStringLiteral Nothing prop)
 
       -- | Generate code in the simplified PHP intermediate representation fora value or expression.
-      valueToPHP :: Expr Ann -> Ident -> m PHP
-      valueToPHP e i =
+      valueToPHP :: Expr Ann -> m PHP
+      valueToPHP e =
         let (ss, _, _, _) = extractAnn e in
-          withPos ss =<< valueToPHP' e i
+          withPos ss =<< valueToPHP' e
 
-      valueToPHP' :: Expr Ann -> Ident -> m PHP
-      valueToPHP' (Literal (pos, _, _, _) l) i =
-        rethrowWithPosition pos $ literalToValuePHP pos l i
-      valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) _ =
+      valueToPHP' :: Expr Ann -> m PHP
+      valueToPHP' (Literal (pos, _, _, _) l) =
+        rethrowWithPosition pos $ literalToValuePHP pos l
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) =
         return $ accessorString "value" $ qualifiedToPHP id name
-      valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) _ =
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) =
         return $ accessorString "create" $ qualifiedToPHP id name
 
-      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ =
+      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
         error "Abs TypeClassConstructor"  
 
-      valueToPHP' (Abs _ arg val) i = do
-        ret <- valueToPHP val i
+      valueToPHP' (Abs _ arg val) = do
+        ret <- valueToPHP val
         let phpArg = case arg of
                         UnusedIdent -> []
                         _           -> [identToPHP arg]
         return $ PFunction Nothing Nothing phpArg (PBlock Nothing True [PReturn Nothing ret])
 
-      valueToPHP' (Var _ ident) _ = return $ varToPHP ident
+      valueToPHP' (Var _ ident) = return $ varToPHP ident
 
-      valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) _ =
+      valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
         error "Constructor isnewtype"
-      valueToPHP' (Constructor _ _ ctor fields) _ = do
+      valueToPHP' (Constructor _ _ _ []) =
+        return $ PUnary Nothing PNew (PClass Nothing Nothing (PBlock Nothing True []))
+      valueToPHP' (Constructor _ _ ctor fields) = do
         let vars = map (\v -> PClassVariableIntroduction Nothing (identToPHP v) Nothing) fields
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- fields ]
               in PMethod Nothing ["public"] "__construct" (identToPHP `map` fields) (PBlock Nothing True body)
             create = case fields of
-              [] -> PClassVariableIntroduction Nothing "value" (Just $ PUnary Nothing PNew (PApp Nothing (PVar' Nothing " self") []))
+              [] -> error "Unreachable"
               (f:fs) ->
                 let body :: [Ident] -> PHP
                     body fs' = case fs' of
                       (h:hs) -> PArrowFunction Nothing [identToPHP h] (PBlock Nothing False [body hs])
-                      [] -> PUnary Nothing PNew (PApp Nothing (PVar' Nothing " self") ((PVar Nothing . identToPHP) `map` fields))
+                      [] -> PUnary Nothing PNew (PApp Nothing (PVar' Nothing "self") ((PVar Nothing . identToPHP) `map` fields))
                 in PMethod Nothing ["public", "static"] "create" [identToPHP f] (PBlock Nothing True [PReturn Nothing (body fs)])
-        return $ PClass Nothing (properToPHP ctor) (PBlock Nothing True $ vars <> [constructor, create])
+        return $ PClass Nothing (Just $ properToPHP ctor) (PBlock Nothing True $ vars <> [constructor, create])
 
-      valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
+      valueToPHP' e = error $ "valueToPHP' not implemented: " <> show e
 
       -- TODO: we probably don't need this
       iife :: Text -> [PHP] -> PHP
       iife v exprs = PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing True $ exprs ++ [PReturn Nothing $ PVar Nothing v])) []
 
-      literalToValuePHP :: SourceSpan -> Literal (Expr Ann) -> Ident -> m PHP
-      literalToValuePHP ss (NumericLiteral n) _ = return $ PNumericLiteral (Just ss) n
-      literalToValuePHP ss (StringLiteral s) _ = return $ PStringLiteral (Just ss) s
-      literalToValuePHP ss (CharLiteral c) _ = return $ PStringLiteral (Just ss) (fromString [c])
-      literalToValuePHP ss (BooleanLiteral b) _ = return $ PBooleanLiteral (Just ss) b
-      literalToValuePHP ss (ArrayLiteral xs) i = PArrayLiteral (Just ss) <$> mapM (`valueToPHP` i) xs
-      literalToValuePHP ss (ObjectLiteral ps) i = do
-        ret <- mapM (sndM (`valueToPHP` i)) ps
+      literalToValuePHP :: SourceSpan -> Literal (Expr Ann) -> m PHP
+      literalToValuePHP ss (NumericLiteral n) = return $ PNumericLiteral (Just ss) n
+      literalToValuePHP ss (StringLiteral s) = return $ PStringLiteral (Just ss) s
+      literalToValuePHP ss (CharLiteral c) = return $ PStringLiteral (Just ss) (fromString [c])
+      literalToValuePHP ss (BooleanLiteral b) = return $ PBooleanLiteral (Just ss) b
+      literalToValuePHP ss (ArrayLiteral xs) = PArrayLiteral (Just ss) <$> mapM valueToPHP xs
+      literalToValuePHP ss (ObjectLiteral ps) = do
+        ret <- mapM (sndM valueToPHP) ps
         -- TODO this fromMaybe shouldn't be here. i think I'm doing something wrong
         let fields :: [PHP]
             fields = map (\(i', p) -> PAssociativeArrayField (Just ss) (fromMaybe "" $ decodeString i') p) ret
