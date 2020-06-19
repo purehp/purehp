@@ -196,6 +196,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       var :: Ident -> PHP
       var = PVar Nothing . identToPHP
 
+      var' :: Ident -> PHP
+      var' = PVar' Nothing . identToPHP
+
       -- | Generate code in the simplified PHP intermediate representation for an accessor based on
       -- a PureScript identifier. If the name is not valid in PHP (symbol based, reserved name) an
       -- indexer is returned.
@@ -207,6 +210,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       accessorString :: PSString -> PHP -> PHP
       accessorString prop = PIndexer Nothing (PStringLiteral Nothing prop)
 
+      staticAccessorString :: PSString -> PHP -> PHP
+      staticAccessorString prop = PStaticIndexer Nothing (PStringLiteral Nothing prop)
+
       -- | Generate code in the simplified PHP intermediate representation fora value or expression.
       valueToPHP :: Expr Ann -> m PHP
       valueToPHP e =
@@ -217,22 +223,39 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       valueToPHP' (Literal (pos, _, _, _) l) =
         rethrowWithPosition pos $ literalToValuePHP pos l
       valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) =
-        return $ accessorString "value" $ qualifiedToPHP id name
+        return $ qualifiedToPHP id name
       valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) =
-        return $ accessorString "create" $ qualifiedToPHP id name
-
+        return $ staticAccessorString "create" $ qualifiedToPHP' id name
+      valueToPHP' (Accessor _ prop val) = error "Accessor not implemented"
+      valueToPHP' (ObjectUpdate _ o ps) = error "Object Update not implemented"
       valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
         error "Abs TypeClassConstructor"  
-
       valueToPHP' (Abs _ arg val) = do
         ret <- valueToPHP val
         let phpArg = case arg of
                         UnusedIdent -> []
                         _           -> [identToPHP arg]
         return $ PFunction Nothing Nothing phpArg (PBlock Nothing True [PReturn Nothing ret])
-
+      valueToPHP' e@App{} = do
+        let (f, args) = unApp e []
+        args' <- mapM valueToPHP args
+        case f of
+          Var (_, _, _, Just IsNewtype) _ -> error "newtype app"
+          Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
+            return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
+          Var (_, _, _, Just IsTypeClassConstructor) name ->
+            error "typeclass constructor"
+          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f
+        where
+          unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
+          unApp (App _ val arg) args = unApp val (arg : args)
+          unApp other args = (other, args)
+      valueToPHP' (Var (_, _, _, Just IsForeign) ident) = error "VAr isForeign"
+      -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
+      --   | fields /= [] = return $ varToPHP' ident
       valueToPHP' (Var _ ident) = return $ varToPHP ident
-
+      valueToPHP' (Case (ss, _, _, _) values binders) = error "Case not implemented"
+      valueToPHP' (Let _ ds val) = error "Let not implemented"
       valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
         error "Constructor isnewtype"
       valueToPHP' (Constructor _ _ _ []) =
@@ -286,6 +309,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       varToPHP (Qualified Nothing ident) = var ident
       varToPHP qual = qualifiedToPHP id qual
 
+      varToPHP' :: Qualified Ident -> PHP
+      varToPHP' (Qualified Nothing ident) = var' ident
+      varToPHP' qual = qualifiedToPHP' id qual
+
       -- | Generate code in the simplified PHP intermediate representation for a refrence to a
       -- variable that may have a qualified name.
       qualifiedToPHP :: (a -> Ident) -> Qualified a -> PHP
@@ -293,6 +320,14 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       qualifiedToPHP f (Qualified (Just mn') a) 
         | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
       qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
+
+      -- | Same as qualifiedToPHP, but generates PVar' (no $)
+      -- TODO: This might need to be reworked in the future
+      qualifiedToPHP' :: (a -> Ident) -> Qualified a -> PHP
+      qualifiedToPHP' f (Qualified (Just C.Prim) a) = PVar' Nothing . runIdent $ f a
+      qualifiedToPHP' f (Qualified (Just mn') a)
+        | mn /= mn' = accessor (f a) (PVar' Nothing (moduleNameToPHP mn'))
+      qualifiedToPHP' f (Qualified _ a) = PVar' Nothing $ identToPHP (f a)
 
       foreignIdent :: Ident -> PHP
       foreignIdent ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")

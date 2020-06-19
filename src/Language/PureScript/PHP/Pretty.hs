@@ -5,6 +5,7 @@ module Language.PureScript.PHP.Pretty
 
 import Prelude.Compat
 
+import Debugger
 import Debug.Trace
 
 import Control.Arrow ((<+>))
@@ -148,6 +149,15 @@ accessor = mkPattern match
         _ -> Nothing
     match _ = Nothing
 
+saccessor :: Pattern PrinterState PHP (Text, PHP)
+saccessor = mkPattern match
+  where
+    match (PStaticIndexer _ (PStringLiteral _ prop) val) =
+      case decodeString prop of
+        Just s | isValidPHPIdentifier s -> Just (s, val)
+        _ -> Nothing
+    match _ = Nothing
+
 indexer :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
 indexer = mkPattern' match
   where
@@ -216,6 +226,7 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
               <> ret ]
         , [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
         , [ Wrap accessor $ \prop val -> val <> emit "->" <> emit prop ]
+        , [ Wrap saccessor $ \prop val -> val <> emit "::" <> emit prop ]
         , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
         , [ unary PNew "new " ]
         , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>

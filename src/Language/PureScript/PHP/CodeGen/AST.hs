@@ -63,7 +63,9 @@ data PHP
   | PAssociativeArrayField (Maybe SourceSpan) Text PHP
   -- ^ A field declaration for an associative array
   | PIndexer (Maybe SourceSpan) PHP PHP
-  -- ^ An array indexer expression
+  -- ^ Class method accessor
+  | PStaticIndexer (Maybe SourceSpan) PHP PHP
+  -- ^ Static version. TODO change names?
   | PObjectLiteral (Maybe SourceSpan) [PHP] -- [(PSString, PHP)]
   -- ^ Object literal for records.
   | PClass (Maybe SourceSpan) (Maybe Text) PHP
@@ -81,6 +83,7 @@ data PHP
   -- ^ Variable
   | PVar' (Maybe SourceSpan) Text
   -- ^ A variable without the `$` prefix
+  -- TODO can this be refactored a bit?
   | PBlock (Maybe SourceSpan) Bool [PHP]
   -- ^ A block of expressions with a bool indicating whether it requires braces
   | PVariableIntroduction (Maybe SourceSpan) Text (Maybe PHP)
