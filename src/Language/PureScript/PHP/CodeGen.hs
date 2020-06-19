@@ -176,9 +176,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             if withoutComment
               then nonRecToPHP a i (modifyAnn removeComments e)
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
-      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ _) = do
-        php <- valueToPHP val ident
-        withPos ss $ php
+      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ fields)
+        | fields /= [] = do
+          php <- valueToPHP val ident
+          withPos ss php
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val ident
         withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
@@ -234,20 +235,22 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) _ =
         error "Constructor isnewtype"
+      valueToPHP' (Constructor _ _ _ []) _ =
+        return $ PUnary Nothing PNew (PClass Nothing Nothing (PBlock Nothing True []))
       valueToPHP' (Constructor _ _ ctor fields) _ = do
         let vars = map (\v -> PClassVariableIntroduction Nothing (identToPHP v) Nothing) fields
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- fields ]
               in PMethod Nothing ["public"] "__construct" (identToPHP `map` fields) (PBlock Nothing True body)
             create = case fields of
-              [] -> PClassVariableIntroduction Nothing "value" (Just $ PUnary Nothing PNew (PApp Nothing (PVar' Nothing " self") []))
+              [] -> error "Unreachable"
               (f:fs) ->
                 let body :: [Ident] -> PHP
                     body fs' = case fs' of
                       (h:hs) -> PArrowFunction Nothing [identToPHP h] (PBlock Nothing False [body hs])
-                      [] -> PUnary Nothing PNew (PApp Nothing (PVar' Nothing " self") ((PVar Nothing . identToPHP) `map` fields))
+                      [] -> PUnary Nothing PNew (PApp Nothing (PVar' Nothing "self") ((PVar Nothing . identToPHP) `map` fields))
                 in PMethod Nothing ["public", "static"] "create" [identToPHP f] (PBlock Nothing True [PReturn Nothing (body fs)])
-        return $ PClass Nothing (properToPHP ctor) (PBlock Nothing True $ vars <> [constructor, create])
+        return $ PClass Nothing (Just $ properToPHP ctor) (PBlock Nothing True $ vars <> [constructor, create])
 
       valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
 

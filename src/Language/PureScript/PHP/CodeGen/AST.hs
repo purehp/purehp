@@ -66,7 +66,7 @@ data PHP
   -- ^ An array indexer expression
   | PObjectLiteral (Maybe SourceSpan) [PHP] -- [(PSString, PHP)]
   -- ^ Object literal for records.
-  | PClass (Maybe SourceSpan) Text PHP
+  | PClass (Maybe SourceSpan) (Maybe Text) PHP
   -- ^ A class for data constructors.
   | PMethod (Maybe SourceSpan) [Text] Text [Text] PHP
   -- ^ A class method (prefixes e.g. visibility, name, args, body)
