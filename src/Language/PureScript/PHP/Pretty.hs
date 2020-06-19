@@ -119,7 +119,7 @@ recr = mkPattern match
     match (PObjectLiteral ss fields) = Just (ss, PArrayLiteral ss fields)
     match _ = Nothing
 
-class_ :: Pattern PrinterState PHP ((Text, Maybe SourceSpan), PHP)
+class_ :: Pattern PrinterState PHP ((Maybe Text, Maybe SourceSpan), PHP)
 class_ = mkPattern match
   where
     match (PClass ss name ret) = Just ((name, ss), ret)
@@ -200,7 +200,7 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
             emit "(object) "
               <> fields ]
         , [ Wrap class_ $ \(name, ss) ret -> addMapping' ss <>
-            emit ("class " <> name <> " ")
+            emit ("class " <> (maybe "" (<> " ") name))
               <> ret ]
         , [ Wrap met $ \(pre, name, args, ss) ret -> addMapping' ss <>
             emit (T.unwords pre
@@ -215,7 +215,7 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
         , [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
         , [ Wrap accessor $ \prop val -> val <> emit "->" <> emit prop ]
         , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
-        , [ unary PNew "new" ]
+        , [ unary PNew "new " ]
         , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
             emit ("function "
               <> fromMaybe "" name

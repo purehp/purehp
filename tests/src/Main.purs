@@ -25,6 +25,6 @@ rec1 = { x: 1, y: "Hello", z: \x -> x }
 
 newtype Foo = Foo Int
 
-data B = A | B Int Int Int
+data Bar = A | B Int Int Int
 
 -- b1 = B 1 2 3
