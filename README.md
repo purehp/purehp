@@ -18,9 +18,15 @@ e.g.
 
 
 
-## TODO
+## TODO NEXT
 
-- Data constructors
-- if/else/etc
-- add the prelude
-- monads
+- [ ] if/else
+- [ ] case
+- [ ] let
+- [ ] typeclasses
+- [ ] exceptions
+- [ ] imports
+- [ ] qualified imports
+- [ ] working prelude
+- [ ] ffi
+
