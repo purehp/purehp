@@ -74,12 +74,43 @@ literals = mkPattern' match'
       , prettyPrintPHP' value
       , return $ emit ";"
       ]
+    match (PWhile _ cond sts) = mconcat <$> sequence
+      [ return $ emit "while ("
+      , prettyPrintPHP' cond
+      , return $ emit ") "
+      , prettyPrintPHP' sts
+      ]
+    match (PFor _ ident start end sts) = mconcat <$> sequence
+      [ return $ emit $ "for ($" <> ident <> " = "
+      , prettyPrintPHP' start
+      , return $ emit $ "; $" <> ident <> " < "
+      , prettyPrintPHP' end
+      , return $ emit $ "; $" <> "++) "
+      , prettyPrintPHP' sts
+      ]
+    match (PForIn _ ident obj sts) = mconcat <$> sequence
+      [ return $ emit $ "foreach ($"
+      , prettyPrintPHP' obj
+      , return $ emit $ " as $" <> ident <> ") "
+      , prettyPrintPHP' sts
+      ]
+    match (PIfElse _ cond thens elses) = mconcat <$> sequence
+      [ return $ emit "if ("
+      , prettyPrintPHP' cond
+      , return $ emit ") "
+      , prettyPrintPHP' thens
+      , maybe (return mempty) (fmap (emit " else " <>) . prettyPrintPHP') elses
+      ]
     match (PReturn _ value) = mconcat <$> sequence
       [ return $ emit "return "
       , prettyPrintPHP' value
       , return $ emit ";"
       ]
     match (PReturnNoResult _) = return $ emit "return"
+    match (PThrow _ value) = mconcat <$> sequence
+      [ return $ emit "throw "
+      , prettyPrintPHP' value
+      ]
     match (PComment _ com php) = mconcat <$> sequence
       [ return $ emit "\n"
       , mconcat <$> forM com comment
@@ -178,6 +209,12 @@ app = mkPattern' match
       return (intercalate (emit ", ") php, val)
     match _ = mzero
 
+instanceOf :: Pattern PrinterState PHP (PHP, PHP)
+instanceOf = mkPattern match
+  where
+    match (PInstanceOf _ val ty) = Just (val, ty)
+    match _ = Nothing
+
 unary' :: (Emit gen) => UnaryOperator -> (PHP -> Text) -> Operator PrinterState PHP gen
 unary' op mkStr = Wrap match (<>)
   where
@@ -189,6 +226,21 @@ unary' op mkStr = Wrap match (<>)
 
 unary :: (Emit gen) => UnaryOperator -> Text -> Operator PrinterState PHP gen
 unary op str = unary' op (const str)
+
+negateOperator :: (Emit gen) => Operator PrinterState PHP gen
+negateOperator = unary' PNegate (\v -> if isNegate v then "- " else "-")
+  where
+    isNegate (PUnary _ PNegate _) = True
+    isNegate _ = False
+
+binary :: (Emit gen) => BinaryOperator -> Text -> Operator PrinterState PHP gen
+binary op str = AssocL match (\v1 v2 -> v1 <> emit (" " <> str <> " ") <> v2)
+  where
+    match :: Pattern PrinterState PHP (PHP, PHP)
+    match = mkPattern match'
+      where
+        match' (PBinary _ op' v1 v2) | op' == op = Just (v1, v2)
+        match' _ = Nothing
 
 prettyStatements :: (Emit gen) => [PHP] -> StateT PrinterState Maybe gen
 prettyStatements sts = do
@@ -234,137 +286,28 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
               <> fromMaybe "" name
               <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
               <> ret ]
+        , [ unary PNot "!"
+          , unary PBitwiseNot "~"
+          , unary PPositive "+"
+          , negateOperator ]
+        , [ binary PMultiply "*"
+          , binary PDivide "/"
+          , binary PModulus "%" ]
+        , [ binary PAdd "+"
+          , binary PSubtract "-" ]
+        , [ binary PShiftLeft "<<"
+          , binary PShiftRight ">>"
+          , binary PZeroFillShiftRight ">>>" ]
+        , [ binary PLessThan "<"
+          , binary PLessThanOrEqualTo "<="
+          , binary PGreaterThan ">"
+          , binary PGreaterThanOrEqualTo ">="
+          , AssocR instanceOf $ \v1 v2 -> v1 <> emit " instanceof " <> v2 ]
+        , [ binary PEqualsTo "==="
+          , binary PNotEqualTo "!==" ]
+        , [ binary PBitwiseAnd "&" ]
+        , [ binary PBitwiseXor "^" ]
+        , [ binary PBitwiseOr "|" ]
+        , [ binary PAnd "&&" ]
+        , [ binary POr "||" ]
       ]
-
-{-
-
-data PrinterState = PrinterState { indent :: Int, transformFilename :: String -> String }
-
-withIndent :: StateT PrinterState Maybe gen -> StateT PrinterState Maybe gen
-withIndent = withIndent' 2
-
-withIndent' :: Int -> StateT PrinterState Maybe gen -> StateT PrinterState Maybe gen
-withIndent' indentSize action = do
-  modify $ \st -> st { indent = indent st + indentSize }
-  result <- action
-  modify $ \st -> st { indent = indent st - indentSize }
-  return result
-
-currentIndent :: (Emit gen) => StateT PrinterState Maybe gen
-currentIndent = do
-  current <- get
-  return $ emit $ T.replicate (indent current) " "
-
-literals :: (Emit gen) => Pattern PrinterState PHP gen
-literals = mkPattern' match
-  where
-
-    match :: (Emit gen) => PHP -> StateT PrinterState Maybe gen
-    match (PNumericLiteral _ n) = return $ emit $ T.pack $ either show show n
-    match (PStringLiteral _ s)  = return $ emit $ prettyPrintString s
-    -- match (PVarBind x e) = mconcat <$> sequence
-    --   [ return $ emit $ "$" <> x <> " = "
-    --   , prettyPrintPHP' e
-    --   ]
-    -- match (PVar x) = return $ emit x
-    -- match (PArrayLiteral es) = mconcat <$> sequence
-    --   [ return $ emit "array( "
-    --   , intercalate (emit ", ") <$> mapM prettyPrintPHP' es
-    --   , return $ emit " )"
-    --   ]
-    -- match (PAssociativeArrayLiteral es) = do
-    --   els <- mapM (\(s, v) -> do
-    --                  php <- prettyPrintPHP' v
-    --                  return $ mconcat [ emit $ prettyPrintStringPHP s
-    --                                   , emit " => "
-    --                                   , php
-    --                                   ]
-    --              ) es
-    --   return $ mconcat
-    --     [ emit "array( "
-    --     , intercalate (emit ", ") els
-    --     , emit " )" ]
-    -- match (PFunFull name binders) = mconcat <$> sequence
-    --   [ return $ emit "function() {\n"
-    --   , withIndent $ prettyPrintBinders binders
-    --   , currentIndent
-    --   , return $ emit "}"
-    --   ]
-    --   where
-    --     prettyPrintBinders :: (Emit gen) => [(PFunBinder, PHP)] -> StateT PrinterState Maybe gen
-    --     prettyPrintBinders bs = intercalate (emit ";\n") <$> mapM prettyPrintBinder bs
-
-    --     matchBody (PBlock es) = prettyPrintBlockBody es
-    --     matchBody e = mconcat <$> sequence
-    --       [ currentIndent
-    --       , prettyPrintPHP' e
-    --       ]
-
-    --     prettyPrintBinder :: (Emit gen) => (PFunBinder, PHP) -> StateT PrinterState Maybe gen
-    --     prettyPrintBinder (PFunBinder binds, e') = do
-    --       b' <- intercalate (emit ", ") <$> mapM prettyPrintPHP' binds
-    --       v <- matchBody e'
-    --       indentStr <- currentIndent
-    --       return $ indentStr <> emit (fromMaybe "" name) <> parensPos b' <> emit " -> \n" <> v
-    match _                     = mzero
-
-
-
-
-
-    -- match (PFunctionDef ss xs e) = mconcat <$> sequence (
-    --   (case ss of
-    --     Just (SourceSpan { spanName = spanName, spanStart = spanStart }) ->
-    --        [ do
-    --            t <- transformFilename <$> get
-    --            return $ emit $ "-file(\"" <> T.pack (t spanName) <> "\", " <> T.pack (show $ sourcePosLine spanStart)
-    --        ]
-    --      _ -> [])
-    --   <>
-    --   [ prettyPrintPHP' e
-    --   , return $ emit ";"
-    --   ])
-
-
-
--- fromChar :: Char -> Word16
--- fromChar = toEnum . fromEnum
-
--- prettyPrintBlockBody :: (Emit gen) => [PHP] -> StateT PrinterState Maybe gen
--- prettyPrintBlockBody es = do
---   es' <- mapM prettyPrintPHP' es
---   indentStr <- currentIndent
---   let lns = intercalate (emit ",\n" <> indentStr) es'
---   pure $ indentStr <> lns
-
--- -- | Pretty print a PSString.
--- prettyPrintStringPHP :: PSString -> Text
--- prettyPrintStringPHP = prettyPrintString
-
--- app :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
--- app = mkPattern' match
---   where
---     -- match (EApp val args) = do
---     --   jss <- traverse prettyPrintPHP' args
---     --   return (intercalate (emit ", ") jss, val)
---     match _ = mzero
-
-prettyPrintPHP :: (String -> String) -> [PHP] -> Text
-prettyPrintPHP transformFilename = error "PrettyPrint" -- maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0 transformFilename) . prettyStatements
-
--- prettyStatements :: (Emit gen) => [PHP] -> StateT PrinterState Maybe gen
--- prettyStatements sts = do
---   jss <- forM sts prettyPrintPHP'
---   indentString <- currentIndent
---   return $ intercalate (emit "\n") $ map ((<> emit ";") . (indentString <>)) jss
-
--- -- | Generate an indented, pretty-printed string representing a Javascript expression
--- prettyPrintPHP' :: (Emit gen) => PHP -> StateT PrinterState Maybe gen
--- prettyPrintPHP' = A.runKleisli $ runPattern matchValue
---   where
---     matchValue :: (Emit gen) => Pattern PrinterState PHP gen
---     matchValue = buildPrettyPrinter operators (literals <+> fmap parensPos matchValue)
---     operators :: (Emit gen) => OperatorTable PrinterState PHP gen
---     operators =
---       OperatorTable []
--}
