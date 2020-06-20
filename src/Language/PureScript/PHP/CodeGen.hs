@@ -254,7 +254,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
       valueToPHP' (Var _ ident) = return $ varToPHP ident
-      valueToPHP' (Case (ss, _, _, _) values binders) = error "Case not implemented"
+      valueToPHP' (Case (ss, _, _, _) values binders) = do
+        vals <- mapM valueToPHP values
+        bindersToPHP ss binders vals
       valueToPHP' (Let _ ds val) = error "Let not implemented"
       valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
         error "Constructor isnewtype"
@@ -334,8 +336,35 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       -- | Generate code in the simplified PHP intermediate representation for a pattern match binders
       -- and guards.
-      binderToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> PHP
-      binderToPHP ss binders vals = error "Implement binderToPHP"
+      bindersToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> m PHP
+      bindersToPHP ss binders vals = do
+        valNames <- replicateM (length vals) freshName
+        let assignments = zipWith (PVariableIntroduction Nothing) valNames (map Just vals)
+        php <- forM binders $ \(CaseAlternative bs result) -> do
+          ret <- guardsToPHP result
+          go valNames ret bs
+        return $ PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing True (assignments ++ concat php ++ [PThrow Nothing $ failedPatternError valNames])))
+                   []
+        where
+          go :: [Text] -> [PHP] -> [Binder Ann] -> m [PHP]
+          go _ done [] = return done
+          go (v:vs) done' (b:bs) = do
+            done'' <- go vs done' bs
+            bindersToPHP v done'' b
+          go _ _ _ = internalError "Invalid argumentst to bindersToPHP"
+
+          failedPatternError :: [Text] -> PHP
+          failedPatternError names = error "missing"
+
+          failedPatternMessage :: Text
+          failedPatternMessage = error "Missing"
+
+          valueError :: Text -> PHP -> PHP
+          valueError _ _ = error "Missing"
+
+          guardsToPHP :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [PHP]
+          guardsToPHP _ = error "Missing"
+
 
       -- | Generate code in the simplified PHP intermediate representation for a pattern match
       -- binder.
