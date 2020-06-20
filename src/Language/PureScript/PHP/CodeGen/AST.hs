@@ -30,6 +30,7 @@ data BinaryOperator
   = PAdd
   | PSubtract
   | PMultiply
+  | PDivide
   | PModulus
   | PEqualsTo
   | PNotEqualTo
@@ -104,8 +105,10 @@ data PHP
   -- ^ Return statement
   | PReturnNoResult (Maybe SourceSpan)
   -- ^ Return statement with no return value
-  -- throw
-  -- instanceof
+  | PThrow (Maybe SourceSpan) PHP
+  -- ^ Throw statement
+  | PInstanceOf (Maybe SourceSpan) PHP PHP
+  -- ^ instance of check
   | PComment (Maybe SourceSpan) [Comment] PHP
   -- ^ Commented php
   deriving (Show, Eq)
@@ -143,8 +146,8 @@ withSourceSpan withSpan = go where
   go (PIfElse _ j1 j2 j3) = PIfElse ss j1 j2 j3
   go (PReturn _ js) = PReturn ss js
   go (PReturnNoResult _) = PReturnNoResult ss
-  -- go (Throw _ js) = Throw ss js
-  -- go (InstanceOf _ j1 j2) = InstanceOf ss j1 j2
+  go (PThrow _ js) = PThrow ss js
+  go (PInstanceOf _ j1 j2) = PInstanceOf ss j1 j2
   go (PComment _ com j) = PComment ss com j
 
 
@@ -178,8 +181,8 @@ getSourceSpan = go where
   go (PIfElse ss _ _ _) = ss
   go (PReturn ss _) = ss
   go (PReturnNoResult ss) = ss
-  -- go (Throw ss _) = ss
-  -- go (InstanceOf ss _ _) = ss
+  go (PThrow ss _) = ss
+  go (PInstanceOf ss _ _) = ss
   go (PComment ss _ _) = ss
 
 
@@ -206,8 +209,8 @@ everywhere f = go where
   go (PForIn ss name j1 j2) = f (PForIn ss name (go j1) (go j2))
   go (PIfElse ss j1 j2 j3) = f (PIfElse ss (go j1) (go j2) (fmap go j3))
   go (PReturn ss js) = f (PReturn ss (go js))
-  -- go (Throw ss js) = f (Throw ss (go js))
-  -- go (InstanceOf ss j1 j2) = f (InstanceOf ss (go j1) (go j2))
+  go (PThrow ss js) = f (PThrow ss (go js))
+  go (PInstanceOf ss j1 j2) = f (PInstanceOf ss (go j1) (go j2))
   go (PComment ss com j) = f (PComment ss com (go j))
   go other = f other
 
@@ -237,8 +240,8 @@ everywhereTopDownM f = f >=> go where
   go (PForIn ss name j1 j2) = PForIn ss name <$> f' j1 <*> f' j2
   go (PIfElse ss j1 j2 j3) = PIfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
   go (PReturn ss j) = PReturn ss <$> f' j
-  -- go (Throw ss j) = Throw ss <$> f' j
-  -- go (InstanceOf ss j1 j2) = InstanceOf ss <$> f' j1 <*> f' j2
+  go (PThrow ss j) = PThrow ss <$> f' j
+  go (PInstanceOf ss j1 j2) = PInstanceOf ss <$> f' j1 <*> f' j2
   go (PComment ss com j) = PComment ss com <$> f' j
   go other = f other
 
@@ -265,56 +268,7 @@ everything (<>.) f = go where
   go j@(PIfElse _ j1 j2 Nothing) = f j <>. go j1 <>. go j2
   go j@(PIfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
   go j@(PReturn _ j1) = f j <>. go j1
-  -- go j@(Throw _ j1) = f j <>. go j1
-  -- go j@(InstanceOf _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(PThrow _ j1) = f j <>. go j1
+  go j@(PInstanceOf _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PComment _ _ j1) = f j <>. go j1
   go other = f other
-
-
--- old stuff
-
-  -- -- | Top-level function definition
-  -- | PFunctionDef (Maybe SourceSpan) [Text] PHP
-  -- -- | Variable bind
-  -- | PVarBind Text PHP
-  -- -- | A variable
-  -- | PVar Text
-  -- -- | A function reference f/1
-  -- | PFunRef PSString Int
-  -- -- | A fun definition
-  -- | PFunFull (Maybe Text) [(PFunBinder, PHP)]
-  -- -- | Function application
-  -- | PApp PHP [PHP]
-  -- -- | Block
-  -- | PBlock [PHP]
-  -- -- | An array
-  -- | PArrayLiteral [PHP]
-  -- -- | An associative array
-  -- | PAssociativeArrayLiteral [(PSString, PHP)]
-
-  -- deriving (Show, Eq)
-
--- -- | Simple 0-arity version of PFun1
--- pattern PFun0 :: Maybe Text -> PHP -> PHP
--- pattern PFun0 name e = PFunFull name [(PFunBinder [], e)]
-
--- -- | Simple fun definition fun f(X) -> e end (arity 1 with single head with simple variable pattern, name optional)
--- pattern PFun1 :: Maybe Text -> Text -> PHP -> PHP
--- pattern PFun1 name var e = PFunFull name [(PFunBinder [PVar var], e)]
-
--- extractVars :: [PHP] -> Maybe [Text]
--- extractVars = traverse var
---   where var (PVar x) = Just x
---         var _ = Nothing
-
--- -- | Simple arity-N versions of PFun1
--- pattern PFunN :: Maybe Text -> [Text] -> PHP -> PHP
--- pattern PFunN name vars e <- PFunFull name [(PFunBinder (extractVars -> Just vars), e)] where
---   PFunN name vars e = PFunFull name [(PFunBinder (map PVar vars), e)]
-
--- data PFunBinder
---   = PFunBinder [PHP]
---   deriving (Show, Eq)
-
--- data Guard = Guard PHP
---   deriving (Show, Eq)

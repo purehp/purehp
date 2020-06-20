@@ -254,7 +254,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
       valueToPHP' (Var _ ident) = return $ varToPHP ident
-      valueToPHP' (Case (ss, _, _, _) values binders) = error "Case not implemented"
+      valueToPHP' (Case (ss, _, _, _) values binders) = do
+        vals <- mapM valueToPHP values
+        bindersToPHP ss binders vals
       valueToPHP' (Let _ ds val) = error "Let not implemented"
       valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
         error "Constructor isnewtype"
@@ -334,16 +336,114 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       -- | Generate code in the simplified PHP intermediate representation for a pattern match binders
       -- and guards.
-      binderToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> PHP
-      binderToPHP ss binders vals = error "Implement binderToPHP"
+      bindersToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> m PHP
+      bindersToPHP ss binders vals = do
+        valNames <- replicateM (length vals) freshName
+        let assignments = zipWith (PVariableIntroduction Nothing) valNames (map Just vals)
+        php <- forM binders $ \(CaseAlternative bs result) -> do
+          ret <- guardsToPHP result
+          go valNames ret bs
+        return $ PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing True (assignments ++ concat php ++ [PThrow Nothing $ failedPatternError valNames])))
+                   []
+        where
+          go :: [Text] -> [PHP] -> [Binder Ann] -> m [PHP]
+          go _ done [] = return done
+          go (v:vs) done' (b:bs) = do
+            done'' <- go vs done' bs
+            binderToPHP v done'' b
+          go _ _ _ = internalError "Invalid argumentst to bindersToPHP"
+
+          failedPatternError :: [Text] -> PHP
+          failedPatternError names = PUnary Nothing PNew $ PApp Nothing (PVar Nothing "Error")
+            [PBinary Nothing PAdd (PStringLiteral Nothing $ mkString failedPatternMessage) (PArrayLiteral Nothing $ zipWith valueError names vals)]
+
+          failedPatternMessage :: Text
+          failedPatternMessage = "Failed pattern match at " <> runModuleName mn <> " " <> displayStartEndPos ss <> ": "
+
+          valueError :: Text -> PHP -> PHP
+          valueError _ l@(PNumericLiteral _ _) = l
+          valueError _ l@(PStringLiteral _ _) = l
+          valueError _ l@(PBooleanLiteral _ _) = l
+          valueError s _ = accessorString "name" . accessorString "constructor" $ PVar Nothing s
+
+          guardsToPHP :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [PHP]
+          guardsToPHP (Left gs) = traverse genGuard gs where
+            genGuard (cond, val) = do
+              cond' <- valueToPHP cond
+              val' <- valueToPHP val
+              return
+                (PIfElse Nothing cond'
+                  (PBlock Nothing True [PReturn Nothing val']) Nothing)
+          guardsToPHP (Right v) = return . PReturn Nothing <$> valueToPHP v
+
+      binderToPHP :: Text -> [PHP] -> Binder Ann -> m [PHP]
+      binderToPHP s done binder =
+        let (ss, _, _, _) = extractBinderAnn binder in
+        traverse (withPos ss) =<< binderToPHP' s done binder
 
       -- | Generate code in the simplified PHP intermediate representation for a pattern match
       -- binder.
       binderToPHP' :: Text -> [PHP] -> Binder Ann -> m [PHP]
-      binderToPHP' _ _ _ = error "Implement binderToPHP'"
+      binderToPHP' _ done NullBinder{} = return done
+      binderToPHP' varName done (LiteralBinder _ l) =
+        literalToBinderPHP varName done l
+      binderToPHP' varName done (VarBinder _ ident) =
+        return (PVariableIntroduction Nothing (identToPHP ident) (Just (PVar Nothing varName)) : done)
+      binderToPHP' varName done (ConstructorBinder (_, _, _, Just IsNewtype) _ _ [b]) =
+        binderToPHP varName done b
+      binderToPHP' varName done (ConstructorBinder (_, _, _, Just (IsConstructor ctorType fields)) _ ctor bs) = do
+        php <- go (zip fields bs) done
+        return $ case ctorType of
+          ProductType -> php
+          SumType ->
+            [PIfElse Nothing (PInstanceOf Nothing (PVar Nothing varName) (qualifiedToPHP (Ident . runProperName) ctor))
+                  (PBlock Nothing True php)
+                  Nothing]
+        where
+          go :: [(Ident, Binder Ann)] -> [PHP] -> m [PHP]
+          go [] done' = return done'
+          go ((field, binder) : remain) done' = do
+            argVar <- freshName
+            done'' <- go remain done'
+            php <- binderToPHP argVar done'' binder
+            return (PVariableIntroduction Nothing argVar (Just $ accessorString (mkString $ identToPHP field) $ PVar Nothing varName) : php)
+      binderToPHP' _ _ ConstructorBinder{} =
+        internalError "binderToJs: Invalid ConstructorBinder in binderToPHP"
+      binderToPHP' varName done (NamedBinder _ ident binder) = do
+        php <- binderToPHP varName done binder
+        return (PVariableIntroduction Nothing (identToPHP ident) (Just (PVar Nothing varName)) : php)
 
       literalToBinderPHP :: Text -> [PHP] -> Literal (Binder Ann) -> m [PHP]
-      literalToBinderPHP _ _ _ = error "Implement literalToBinderPHP"
+      literalToBinderPHP varName done (NumericLiteral num) =
+        return [PIfElse Nothing (PBinary Nothing PEqualsTo (PVar Nothing varName) (PNumericLiteral Nothing num)) (PBlock Nothing True done) Nothing]
+      literalToBinderPHP varName done (CharLiteral c) =
+        return [PIfElse Nothing (PBinary Nothing PEqualsTo (PVar Nothing varName) (PStringLiteral Nothing (fromString [c]))) (PBlock Nothing True done) Nothing]
+      literalToBinderPHP varName done (StringLiteral str) =
+        return [PIfElse Nothing (PBinary Nothing PEqualsTo (PVar Nothing varName) (PStringLiteral Nothing str)) (PBlock Nothing True done) Nothing]
+      literalToBinderPHP varName done (BooleanLiteral True) =
+        return [PIfElse Nothing (PVar Nothing varName) (PBlock Nothing True done) Nothing]
+      literalToBinderPHP varName done (BooleanLiteral False) =
+        return [PIfElse Nothing (PUnary Nothing PNot (PVar Nothing varName)) (PBlock Nothing True done) Nothing]
+      literalToBinderPHP varName done (ObjectLiteral bs) = go done bs
+        where
+          go :: [PHP] -> [(PSString, Binder Ann)] -> m [PHP]
+          go done' [] = return done'
+          go done' ((prop, binder):bs') = do
+            propVar <- freshName
+            done'' <- go done' bs'
+            php <- binderToPHP propVar done'' binder
+            return (PVariableIntroduction Nothing propVar (Just (accessorString prop (PVar Nothing varName))) : php)
+      literalToBinderPHP varName done (ArrayLiteral bs) = do
+        php <- go done 0 bs
+        return [PIfElse Nothing (PBinary Nothing PEqualsTo (accessorString "length" (PVar Nothing varName)) (PNumericLiteral Nothing (Left (fromIntegral $ length bs)))) (PBlock Nothing True php) Nothing]
+        where
+          go :: [PHP] -> Integer -> [Binder Ann] -> m [PHP]
+          go done' _ [] = return done'
+          go done' index (binder:bs') = do
+            elVar <- freshName
+            done'' <- go done' (index + 1) bs'
+            php <- binderToPHP elVar done'' binder
+            return (PVariableIntroduction Nothing elVar (Just (PIndexer Nothing (PNumericLiteral Nothing (Left index)) (PVar Nothing varName))) : php)
 
       -- Check that all integers fall within the valid int range for PHP.
       -- TODO: check what's needed for PHP
