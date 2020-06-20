@@ -92,10 +92,14 @@ data PHP
   -- ^ A class variable introduction
   | PAssignment (Maybe SourceSpan) PHP PHP
   -- ^ A variable assignment
-  -- while
-  -- for
-  -- forin
-  -- ifelse
+  | PWhile (Maybe SourceSpan) PHP PHP
+  -- ^ While loop ?
+  | PFor (Maybe SourceSpan) Text PHP PHP PHP
+  -- ^ For loop
+  | PForIn (Maybe SourceSpan) Text PHP PHP
+  -- ^ ForIn loop
+  | PIfElse (Maybe SourceSpan) PHP PHP (Maybe PHP)
+  -- ^ If-then-else statement
   | PReturn (Maybe SourceSpan) PHP
   -- ^ Return statement
   | PReturnNoResult (Maybe SourceSpan)
@@ -120,8 +124,12 @@ withSourceSpan withSpan = go where
   go (PArrayLiteral _ js) = PArrayLiteral ss js
   go (PAssociativeArrayField _ n v) = PAssociativeArrayField ss n v
   go (PIndexer _ j1 j2) = PIndexer ss j1 j2
+  go (PStaticIndexer _ j1 j2) = PStaticIndexer ss j1 j2
   go (PObjectLiteral _ js) = PObjectLiteral ss js
+  go (PClass _ mt p) = PClass ss mt p
+  go (PMethod _ v name args p) = PMethod ss v name args p
   go (PFunction _ name args j) = PFunction ss name args j
+  go (PArrowFunction _ t p) = PArrowFunction ss t p
   go (PApp _ j js) = PApp ss j js
   go (PVar _ s) = PVar ss s
   go (PVar' _ s) = PVar' ss s
@@ -129,10 +137,10 @@ withSourceSpan withSpan = go where
   go (PVariableIntroduction _ name j) = PVariableIntroduction ss name j
   go (PClassVariableIntroduction _ name j) = PClassVariableIntroduction ss name j
   go (PAssignment _ j1 j2) = PAssignment ss j1 j2
-  -- go (While _ j1 j2) = While ss j1 j2
-  -- go (For _ name j1 j2 j3) = For ss name j1 j2 j3
-  -- go (ForIn _ name j1 j2) = ForIn ss name j1 j2
-  -- go (IfElse _ j1 j2 j3) = IfElse ss j1 j2 j3
+  go (PWhile _ j1 j2) = PWhile ss j1 j2
+  go (PFor _ name j1 j2 j3) = PFor ss name j1 j2 j3
+  go (PForIn _ name j1 j2) = PForIn ss name j1 j2
+  go (PIfElse _ j1 j2 j3) = PIfElse ss j1 j2 j3
   go (PReturn _ js) = PReturn ss js
   go (PReturnNoResult _) = PReturnNoResult ss
   -- go (Throw _ js) = Throw ss js
@@ -151,8 +159,12 @@ getSourceSpan = go where
   go (PArrayLiteral ss _) = ss
   go (PAssociativeArrayField ss _ _) = ss
   go (PIndexer ss _ _) = ss
+  go (PStaticIndexer ss _ _) = ss
   go (PObjectLiteral ss  _) = ss
+  go (PClass ss _ _) = ss
+  go (PMethod ss _ _ _ _) = ss
   go (PFunction ss _ _ _) = ss
+  go (PArrowFunction ss _ _) = ss
   go (PApp ss _ _) = ss
   go (PVar ss _) = ss
   go (PVar' ss _) = ss
@@ -160,10 +172,10 @@ getSourceSpan = go where
   go (PVariableIntroduction ss _ _) = ss
   go (PClassVariableIntroduction ss _ _) = ss
   go (PAssignment ss _ _) = ss
-  -- go (While ss _ _) = ss
-  -- go (For ss _ _ _ _) = ss
-  -- go (ForIn ss _ _ _) = ss
-  -- go (IfElse ss _ _ _) = ss
+  go (PWhile ss _ _) = ss
+  go (PFor ss _ _ _ _) = ss
+  go (PForIn ss _ _ _) = ss
+  go (PIfElse ss _ _ _) = ss
   go (PReturn ss _) = ss
   go (PReturnNoResult ss) = ss
   -- go (Throw ss _) = ss
@@ -178,17 +190,21 @@ everywhere f = go where
   go (PBinary ss op j1 j2) = f (PBinary ss op (go j1) (go j2))
   go (PArrayLiteral ss js) = f (PArrayLiteral ss (map go js))
   go (PIndexer ss j1 j2) = f (PIndexer ss (go j1) (go j2))
+  go (PStaticIndexer ss j1 j2) = f (PStaticIndexer ss (go j1) (go j2))
   go (PObjectLiteral ss js) = f (PObjectLiteral ss (map go js)) -- (map (fmap go) js))
+  go (PClass ss t p) = f (PClass ss t (go p))
+  go (PMethod ss vis name args p) = f (PMethod ss vis name args (go p))
   go (PFunction ss name args j) = f (PFunction ss name args (go j))
+  go (PArrowFunction ss args j) = f (PArrowFunction ss args (go j))
   go (PApp ss j js) = f (PApp ss (go j) (map go js))
   go (PBlock ss b js) = f (PBlock ss b (map go js))
   go (PVariableIntroduction ss name j) = f (PVariableIntroduction ss name (fmap go j))
   go (PClassVariableIntroduction ss name j) = f (PClassVariableIntroduction ss name (fmap go j))
   go (PAssignment ss j1 j2) = f (PAssignment ss (go j1) (go j2))
-  -- go (While ss j1 j2) = f (While ss (go j1) (go j2))
-  -- go (For ss name j1 j2 j3) = f (For ss name (go j1) (go j2) (go j3))
-  -- go (ForIn ss name j1 j2) = f (ForIn ss name (go j1) (go j2))
-  -- go (IfElse ss j1 j2 j3) = f (IfElse ss (go j1) (go j2) (fmap go j3))
+  go (PWhile ss j1 j2) = f (PWhile ss (go j1) (go j2))
+  go (PFor ss name j1 j2 j3) = f (PFor ss name (go j1) (go j2) (go j3))
+  go (PForIn ss name j1 j2) = f (PForIn ss name (go j1) (go j2))
+  go (PIfElse ss j1 j2 j3) = f (PIfElse ss (go j1) (go j2) (fmap go j3))
   go (PReturn ss js) = f (PReturn ss (go js))
   -- go (Throw ss js) = f (Throw ss (go js))
   -- go (InstanceOf ss j1 j2) = f (InstanceOf ss (go j1) (go j2))
@@ -205,17 +221,21 @@ everywhereTopDownM f = f >=> go where
   go (PBinary ss op j1 j2) = PBinary ss op <$> f' j1 <*> f' j2
   go (PArrayLiteral ss js) = PArrayLiteral ss <$> traverse f' js
   go (PIndexer ss j1 j2) = PIndexer ss <$> f' j1 <*> f' j2
+  go (PStaticIndexer ss j1 j2) = PStaticIndexer ss <$> f' j1 <*> f' j2
   go (PObjectLiteral ss js) = PObjectLiteral ss <$> traverse f' js -- traverse (sndM f') js
+  go (PClass ss n j) = PClass ss n <$> f' j
+  go (PMethod ss vis name args p) = PMethod ss vis name args <$> f' p
   go (PFunction ss name args j) = PFunction ss name args <$> f' j
+  go (PArrowFunction ss args j) = PArrowFunction ss args <$> f' j
   go (PApp ss j js) = PApp ss <$> f' j <*> traverse f' js
   go (PBlock ss b js) = PBlock ss b <$> traverse f' js
   go (PVariableIntroduction ss name j) = PVariableIntroduction ss name <$> traverse f' j
   go (PClassVariableIntroduction ss name j) = PClassVariableIntroduction ss name <$> traverse f' j
   go (PAssignment ss j1 j2) = PAssignment ss <$> f' j1 <*> f' j2
-  -- go (While ss j1 j2) = While ss <$> f' j1 <*> f' j2
-  -- go (For ss name j1 j2 j3) = For ss name <$> f' j1 <*> f' j2 <*> f' j3
-  -- go (ForIn ss name j1 j2) = ForIn ss name <$> f' j1 <*> f' j2
-  -- go (IfElse ss j1 j2 j3) = IfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
+  go (PWhile ss j1 j2) = PWhile ss <$> f' j1 <*> f' j2
+  go (PFor ss name j1 j2 j3) = PFor ss name <$> f' j1 <*> f' j2 <*> f' j3
+  go (PForIn ss name j1 j2) = PForIn ss name <$> f' j1 <*> f' j2
+  go (PIfElse ss j1 j2 j3) = PIfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
   go (PReturn ss j) = PReturn ss <$> f' j
   -- go (Throw ss j) = Throw ss <$> f' j
   -- go (InstanceOf ss j1 j2) = InstanceOf ss <$> f' j1 <*> f' j2
@@ -228,18 +248,22 @@ everything (<>.) f = go where
   go j@(PBinary _ _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PArrayLiteral _ js) = foldl (<>.) (f j) (map go js)
   go j@(PIndexer _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(PStaticIndexer _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PObjectLiteral _ js) = foldl (<>.) (f j) (map go js) -- (map (go . snd) js)
+  go j@(PClass _ _ js) = f j <>. go js
   go j@(PFunction _ _ _ j1) = f j <>. go j1
+  go j@(PMethod _ _ _ _ p) = f j <>. go p
+  go j@(PArrowFunction _ _ j1) = f j <>. go j1
   go j@(PApp _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
   go j@(PBlock _ _ js) = foldl (<>.) (f j) (map go js)
   go j@(PVariableIntroduction _ _ (Just j1)) = f j <>. go j1
   go j@(PClassVariableIntroduction _ _ (Just j1)) = f j <>. go j1
   go j@(PAssignment _ j1 j2) = f j <>. go j1 <>. go j2
-  -- go j@(While _ j1 j2) = f j <>. go j1 <>. go j2
-  -- go j@(For _ _ j1 j2 j3) = f j <>. go j1 <>. go j2 <>. go j3
-  -- go j@(ForIn _ _ j1 j2) = f j <>. go j1 <>. go j2
-  -- go j@(IfElse _ j1 j2 Nothing) = f j <>. go j1 <>. go j2
-  -- go j@(IfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
+  go j@(PWhile _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(PFor _ _ j1 j2 j3) = f j <>. go j1 <>. go j2 <>. go j3
+  go j@(PForIn _ _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(PIfElse _ j1 j2 Nothing) = f j <>. go j1 <>. go j2
+  go j@(PIfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
   go j@(PReturn _ j1) = f j <>. go j1
   -- go j@(Throw _ j1) = f j <>. go j1
   -- go j@(InstanceOf _ j1 j2) = f j <>. go j1 <>. go j2
