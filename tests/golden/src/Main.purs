@@ -1,6 +1,8 @@
 module Main where
 
 -- import Prelude
+--- import Foo.Foo
+
 
 int1 :: Int
 int1 = 5
@@ -23,7 +25,7 @@ fun1 arg = arg
 rec1 :: { x :: Int, y :: String, z :: Int -> Int }
 rec1 = { x: 1, y: "Hello", z: \x -> x }
 
-newtype Foo = Foo Int
+newtype NewFoo = NewFoo Int
 
 data Bar = A | B Int Int Int
 

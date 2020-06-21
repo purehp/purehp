@@ -129,3 +129,56 @@ executable purehp
     build-depends:
         gitrev
   default-language: Haskell2010
+
+test-suite tests
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      TestGolden
+      TestUtils
+      Paths_purehp
+  hs-source-dirs:
+      tests
+  ghc-options: -Wall -O2 -Wall
+  build-tools:
+      happy
+  build-depends:
+      Cabal
+    , Glob
+    , HUnit
+    , aeson
+    , aeson-better-errors
+    , aeson-pretty
+    , ansi-terminal
+    , base >=4.7 && <5
+    , base-compat
+    , boxes
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , hscolour
+    , hspec
+    , hspec-discover
+    , monad-control
+    , mtl
+    , parsec
+    , pattern-arrows
+    , pretty-show
+    , process
+    , protolude
+    , purehp
+    , purescript
+    , regex-base
+    , serialise
+    , tasty
+    , tasty-golden
+    , tasty-hspec
+    , tasty-quickcheck
+    , text
+    , time
+    , transformers
+    , transformers-base
+    , transformers-compat
+    , utf8-string
+  default-language: Haskell2010

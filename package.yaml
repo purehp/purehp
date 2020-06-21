@@ -92,6 +92,23 @@ executables:
         dependencies:
         - gitrev
 
+tests:
+  tests:
+    main: Main.hs
+    source-dirs: tests
+    ghc-options: -Wall
+    dependencies:
+      - purescript
+      - purehp
+      - tasty
+      - tasty-golden
+      - tasty-hspec
+      - tasty-quickcheck
+      - hspec
+      - hspec-discover
+      - HUnit
+      - regex-base
+
 # tests:
 #   purehp:
 #     type:         exitcode-stdio-1.0
