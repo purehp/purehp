@@ -1,8 +1,4 @@
-module Main where
-
--- import Prelude
---- import Foo.Foo
-
+module Literals where
 
 int1 :: Int
 int1 = 5
@@ -19,21 +15,5 @@ char1 = 'C'
 array1 :: Array Int
 array1 = [1, 2, 3, 4]
 
-fun1 :: Int -> Int
-fun1 arg = arg
-
 rec1 :: { x :: Int, y :: String, z :: Int -> Int }
 rec1 = { x: 1, y: "Hello", z: \x -> x }
-
-newtype NewFoo = NewFoo Int
-
-data Bar = A | B Int Int Int
-
-bar1 :: Bar
-bar1 = A
-
-bar2 :: Bar
-bar2 = B 1 2 3
-
-bar3 :: Int -> Bar
-bar3 = B 1 2
