@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections     #-}
 module Build (parser) where
 
@@ -7,6 +8,7 @@ import           Control.Exception                   (tryJust)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Supply
+import           Control.Monad.Trans.Class           (lift)
 import           Data.Aeson                          as Aeson
 import qualified Data.Aeson                          as A
 import           Data.Aeson.Types                    (Value, parseMaybe)
@@ -15,6 +17,7 @@ import qualified Data.ByteString.Lazy.UTF8           as LBU8
 import qualified Data.Map                            as M
 import           Data.Maybe                          (catMaybes, mapMaybe)
 import qualified Data.Text                           as T
+import qualified Data.Text.Encoding                  as TE
 import qualified Language.PureScript                 as P
 import qualified Language.PureScript.CoreFn          as CoreFn
 import qualified Language.PureScript.CoreFn.FromJSON as CoreFn
@@ -36,7 +39,7 @@ import           System.IO                           (hPutStr, hPutStrLn,
                                                       stderr)
 import           System.IO.Error                     (isDoesNotExistError)
 
-import Debug.Trace
+import           Debug.Trace
 
 
 data BuildOptions = BuildOptions
@@ -84,13 +87,14 @@ compile BuildOptions{..} = do
     forM_ modules' $ \(m, _, _, ts) -> do
       shouldBuild <- needsBuild buildActions ts $ CoreFn.moduleName m
       when shouldBuild $ do
-        _ <- runSupplyT 0 $ Make.codegen buildActions m
+        ((file, php), _) <- runSupplyT 0 $ Make.codegen buildActions m
+        MM.writeTextFile file $ TE.encodeUtf8 php
         Make.ffiCodegen buildActions m
 
   printWarningsAndErrors False False makeWarnings makeErrors
 
   case buildRun of
-    Nothing -> pure ()
+    Nothing        -> pure ()
     Just runModule -> runProgram $ T.pack runModule
 
   exitSuccess
