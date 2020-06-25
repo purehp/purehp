@@ -110,6 +110,7 @@ literals = mkPattern' match'
     match (PThrow _ value) = mconcat <$> sequence
       [ return $ emit "throw "
       , prettyPrintPHP' value
+      , return $ emit ";"
       ]
     match (PComment _ com php) = mconcat <$> sequence
       [ return $ emit "\n"
