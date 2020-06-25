@@ -19,11 +19,16 @@ e.g.
 
 
 
-## TODO NEXT
+## TODO
 
-- [ ] if/else
-- [ ] case
+- [x] Numers/Strings/Bools
+- [x] Variables
+- [x] Data constructors
+- [x] Functions
+- [x] if/else
+- [x] case
 - [ ] let
+- [ ] exceptions
 - [ ] typeclasses
 - [ ] exceptions
 - [ ] imports
