@@ -92,6 +92,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                   . filter (flip S.member usedModuleNames)
                   . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
     F.traverse_ (F.traverse_ checkIntegers) optimized
+    -- TODO: reimplement this
     comments <- not <$> asks optionsNoComments
     -- let phpTagOpen = PStringLiteral Nothing "<?php"
     --     phpTagClose = PStringLiteral Nothing "?>"
@@ -338,7 +339,8 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- and guards.
       bindersToPHP :: SourceSpan -> [CaseAlternative Ann] -> [PHP] -> m PHP
       bindersToPHP ss binders vals = do
-        valNames <- replicateM (length vals) freshName
+        valNames <- replicateM (length vals) freshNamePHP
+        traceShowIdPP valNames
         let assignments = zipWith (PVariableIntroduction Nothing) valNames (map Just vals)
         php <- forM binders $ \(CaseAlternative bs result) -> do
           ret <- guardsToPHP result
@@ -403,7 +405,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           go :: [(Ident, Binder Ann)] -> [PHP] -> m [PHP]
           go [] done' = return done'
           go ((field, binder) : remain) done' = do
-            argVar <- freshName
+            argVar <- freshNamePHP
             done'' <- go remain done'
             php <- binderToPHP argVar done'' binder
             return (PVariableIntroduction Nothing argVar (Just $ accessorString (mkString $ identToPHP field) $ PVar Nothing varName) : php)
@@ -429,7 +431,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           go :: [PHP] -> [(PSString, Binder Ann)] -> m [PHP]
           go done' [] = return done'
           go done' ((prop, binder):bs') = do
-            propVar <- freshName
+            propVar <- freshNamePHP
             done'' <- go done' bs'
             php <- binderToPHP propVar done'' binder
             return (PVariableIntroduction Nothing propVar (Just (accessorString prop (PVar Nothing varName))) : php)
@@ -440,7 +442,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           go :: [PHP] -> Integer -> [Binder Ann] -> m [PHP]
           go done' _ [] = return done'
           go done' index (binder:bs') = do
-            elVar <- freshName
+            elVar <- freshNamePHP
             done'' <- go done' (index + 1) bs'
             php <- binderToPHP elVar done'' binder
             return (PVariableIntroduction Nothing elVar (Just (PIndexer Nothing (PNumericLiteral Nothing (Left index)) (PVar Nothing varName))) : php)
@@ -469,10 +471,11 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       
 
-{-
+
 freshNamePHP :: (MonadSupply m) => m T.Text
 freshNamePHP = fmap (("_@" <>) . T.pack . show) fresh
 
+{-
 isTopLevelBinding :: Qualified t -> Bool
 isTopLevelBinding (Qualified (Just _) _) = True
 isTopLevelBinding (Qualified Nothing _) = False
