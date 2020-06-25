@@ -35,4 +35,7 @@ e.g.
 - [ ] qualified imports
 - [ ] working prelude
 - [ ] ffi
+- [ ] optimization
+- [ ] packages
+- [ ] tooling
 
