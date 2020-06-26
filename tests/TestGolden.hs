@@ -78,7 +78,7 @@ main = do
       ((file, php), _) <- runSupplyT 0 $ Make.codegen buildActions m
       return [ goldenVsString
                ("'" <> takeFileName file <> "' golden test")
-               (joinPath ["tests", "golden", replaceExtension file ".php"])
+               (joinPath ["tests", "golden", "expected", takeFileName file])
                (return $ BS.fromStrict . T.encodeUtf8 $ php)
              ]
   case res of
