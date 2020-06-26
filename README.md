@@ -27,7 +27,7 @@ e.g.
 - [x] Functions
 - [x] if/else
 - [x] case
-- [ ] let
+- [x] let
 - [ ] typeclasses
 - [ ] exceptions
 - [ ] imports
