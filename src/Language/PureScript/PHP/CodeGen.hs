@@ -214,6 +214,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       staticAccessorString :: PSString -> PHP -> PHP
       staticAccessorString prop = PStaticIndexer Nothing (PStringLiteral Nothing prop)
 
+      recBinding :: Bind Ann -> m PHP
+      recBinding (NonRec _ (Ident name) expr) = (return . PVariableIntroduction Nothing name) =<< (Just <$> valueToPHP' expr)
+      recBinding _                            = error "only nonrecursive alphanumeric identifiers are allowed in let bindings for the moment"
+
       -- | Generate code in the simplified PHP intermediate representation fora value or expression.
       valueToPHP :: Expr Ann -> m PHP
       valueToPHP e =
@@ -264,7 +268,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       valueToPHP' (Case (ss, _, _, _) values binders) = do
         vals <- mapM valueToPHP values
         bindersToPHP ss binders vals
-      valueToPHP' (Let _ ds val) = error "Let not implemented"
+      valueToPHP' (Let _ ds val) =
+        (\x -> return $ PApp Nothing (PFunction Nothing Nothing [] x) []) =<<
+          (\binds expr -> PBlock Nothing True $ binds ++ [PReturn Nothing expr]) <$> (sequence $ recBinding <$> ds) <*> (valueToPHP' val)
       valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
         error "Constructor isnewtype"
       valueToPHP' (Constructor _ _ _ []) =
