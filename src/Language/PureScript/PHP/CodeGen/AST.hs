@@ -74,8 +74,8 @@ data PHP
   | PMethod (Maybe SourceSpan) [Text] Text [Text] PHP
   -- ^ A class method (prefixes e.g. visibility, name, args, body)
   -- TODO: use data type instead of text, NonEmptyList or fixed args?
-  | PFunction (Maybe SourceSpan) (Maybe Text) [Text] PHP
-  -- ^ A function introduction (optional name, arguments, body)
+  | PFunction (Maybe SourceSpan) (Maybe Text) [Text] [Text] PHP
+  -- ^ A function introduction (optional name, arguments, outer scope, body)
   | PArrowFunction (Maybe SourceSpan) [Text] PHP
   -- ^ An arrow function
   | PApp (Maybe SourceSpan) PHP [PHP]
@@ -131,7 +131,7 @@ withSourceSpan withSpan = go where
   go (PObjectLiteral _ js) = PObjectLiteral ss js
   go (PClass _ mt p) = PClass ss mt p
   go (PMethod _ v name args p) = PMethod ss v name args p
-  go (PFunction _ name args j) = PFunction ss name args j
+  go (PFunction _ name args oscope j) = PFunction ss name args oscope j
   go (PArrowFunction _ t p) = PArrowFunction ss t p
   go (PApp _ j js) = PApp ss j js
   go (PVar _ s) = PVar ss s
@@ -166,7 +166,7 @@ getSourceSpan = go where
   go (PObjectLiteral ss  _) = ss
   go (PClass ss _ _) = ss
   go (PMethod ss _ _ _ _) = ss
-  go (PFunction ss _ _ _) = ss
+  go (PFunction ss _ _ _ _) = ss
   go (PArrowFunction ss _ _) = ss
   go (PApp ss _ _) = ss
   go (PVar ss _) = ss
@@ -197,7 +197,7 @@ everywhere f = go where
   go (PObjectLiteral ss js) = f (PObjectLiteral ss (map go js)) -- (map (fmap go) js))
   go (PClass ss t p) = f (PClass ss t (go p))
   go (PMethod ss vis name args p) = f (PMethod ss vis name args (go p))
-  go (PFunction ss name args j) = f (PFunction ss name args (go j))
+  go (PFunction ss name args oscope j) = f (PFunction ss name args oscope (go j))
   go (PArrowFunction ss args j) = f (PArrowFunction ss args (go j))
   go (PApp ss j js) = f (PApp ss (go j) (map go js))
   go (PBlock ss b js) = f (PBlock ss b (map go js))
@@ -228,7 +228,7 @@ everywhereTopDownM f = f >=> go where
   go (PObjectLiteral ss js) = PObjectLiteral ss <$> traverse f' js -- traverse (sndM f') js
   go (PClass ss n j) = PClass ss n <$> f' j
   go (PMethod ss vis name args p) = PMethod ss vis name args <$> f' p
-  go (PFunction ss name args j) = PFunction ss name args <$> f' j
+  go (PFunction ss name args oscope j) = PFunction ss name args oscope <$> f' j
   go (PArrowFunction ss args j) = PArrowFunction ss args <$> f' j
   go (PApp ss j js) = PApp ss <$> f' j <*> traverse f' js
   go (PBlock ss b js) = PBlock ss b <$> traverse f' js
@@ -254,7 +254,7 @@ everything (<>.) f = go where
   go j@(PStaticIndexer _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PObjectLiteral _ js) = foldl (<>.) (f j) (map go js) -- (map (go . snd) js)
   go j@(PClass _ _ js) = f j <>. go js
-  go j@(PFunction _ _ _ j1) = f j <>. go j1
+  go j@(PFunction _ _ _ _ j1) = f j <>. go j1
   go j@(PMethod _ _ _ _ p) = f j <>. go p
   go j@(PArrowFunction _ _ j1) = f j <>. go j1
   go j@(PApp _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
