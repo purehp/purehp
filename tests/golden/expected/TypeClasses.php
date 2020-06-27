@@ -24,7 +24,7 @@ $map = function ($dict) {
     return $dict->map;
 };
 $functorFoo = new Functor(function ($f) {
-    return function ($v) {
+    return function ($v) use ($f) {
         $__0 = $f;
         $__1 = $v;
         $f1 = $__0;

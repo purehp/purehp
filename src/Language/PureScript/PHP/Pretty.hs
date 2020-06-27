@@ -196,10 +196,10 @@ indexer = mkPattern' match
     match (PIndexer _ index val) = (,) <$> prettyPrintPHP' index <*> pure val
     match _ = mzero
 
-lam :: Pattern PrinterState PHP ((Maybe Text, [Text], Maybe SourceSpan), PHP)
+lam :: Pattern PrinterState PHP ((Maybe Text, [Text], [Text], Maybe SourceSpan), PHP)
 lam = mkPattern match
   where
-    match (PFunction ss name args ret) = Just ((name, args, ss), ret)
+    match (PFunction ss name args oscope ret) = Just ((name, args, oscope, ss), ret)
     match _ = Nothing
 
 app :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
@@ -282,11 +282,16 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
         , [ Wrap saccessor $ \prop val -> val <> emit "::" <> emit prop ]
         , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
         , [ unary PNew "new " ]
-        , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
-            emit ("function "
-              <> fromMaybe "" name
-              <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") ")
-              <> ret ]
+        , [ Wrap lam $ \(name, args, oscope, ss) ret ->
+              let use = if null oscope
+                        then ""
+                        else "use (" <> intercalate ", " (("$" <>) <$> oscope) <> ") "
+              in addMapping' ss <>
+                   emit ("function "
+                     <> fromMaybe "" name
+                     <> "(" <> intercalate ", " (("$" <>) <$> args) <> ") "
+                     <> use)
+                     <> ret ]
         , [ unary PNot "!"
           , unary PBitwiseNot "~"
           , unary PPositive "+"

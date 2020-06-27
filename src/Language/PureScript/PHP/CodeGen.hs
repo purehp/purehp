@@ -183,13 +183,13 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
       nonRecToPHP (ss, _, _, _) _ val@(Constructor _ _ _ fields)
         | fields /= [] = do
-          php <- valueToPHP val
+          php <- valueToPHP val []
           withPos ss php
       nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
-        php <- valueToPHP val
+        php <- valueToPHP val []
         withPos ss (PClass Nothing (Just $ runIdent ident) php)
       nonRecToPHP (ss, _, _, _) ident val = do
-        php <- valueToPHP val
+        php <- valueToPHP val []
         withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
 
       withPos :: MonadReader Options m => SourceSpan -> PHP -> m PHP
@@ -222,80 +222,83 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       staticAccessorString prop = PStaticIndexer Nothing (PStringLiteral Nothing prop)
 
       recBinding :: (Monad m) => Bind Ann -> m PHP
-      recBinding (NonRec _ (Ident name) expr) = (return . PVariableIntroduction Nothing name) =<< (Just <$> valueToPHP' expr)
+      recBinding (NonRec _ (Ident name) expr) = (return . PVariableIntroduction Nothing name) =<< (Just <$> valueToPHP' expr [])
       recBinding _                            = error "only nonrecursive alphanumeric identifiers are allowed in let bindings for the moment"
 
       -- | Generate code in the simplified PHP intermediate representation fora value or expression.
-      valueToPHP :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> m PHP
-      valueToPHP e =
+      -- It threads the outer scope down
+      valueToPHP :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> [Text] -> m PHP
+      valueToPHP e oscope =
         let (ss, _, _, _) = extractAnn e in
-          withPos ss =<< valueToPHP' e
+          withPos ss =<< valueToPHP' e oscope
 
-      valueToPHP' :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> m PHP
-      valueToPHP' (Literal (pos, _, _, _) l) =
+      -- | valueToPHP' thread the outerScope for functions
+      valueToPHP' :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> [Text] -> m PHP
+      valueToPHP' (Literal (pos, _, _, _) l) _ =
         rethrowWithPosition pos $ literalToValuePHP pos l
-      valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) =
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) _ =
         return $ qualifiedToPHP id name
-      valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) =
+      valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) _ =
         return $ staticAccessorString "create" $ qualifiedToPHP' id name
-      valueToPHP' (Accessor _ prop val) =
-        accessorString prop <$> valueToPHP val
-      valueToPHP' (ObjectUpdate _ o ps) = error "Object Update not implemented"
-      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
+      valueToPHP' (Accessor _ prop val) oscope =
+        accessorString prop <$> valueToPHP val oscope
+      valueToPHP' (ObjectUpdate _ o ps) _ = error "Object Update not implemented"
+      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ =
         let args = unAbs e
             vars = map assign args
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- args ]
               in PMethod Nothing ["public"] "__construct" (identToPHP `map` args) (PBlock Nothing True body)
         in return $ PBlock Nothing True (vars <> [constructor])
-        -- in return $ PFunction Nothing Nothing (map identToPHP args) (PBlock Nothing True $ map assign args)
         where
           unAbs :: Expr Ann -> [Ident]
           unAbs (Abs _ arg val) = arg : unAbs val
           unAbs _               = []
           assign :: Ident -> PHP
           assign name = PClassVariableIntroduction Nothing (runIdent name) Nothing
-      valueToPHP' (Abs _ arg val@Case{}) = do
-        ret <- valueToPHP val
+      valueToPHP' (Abs _ arg val@Case{}) oscope = do
         let phpArg = case arg of
                         UnusedIdent -> []
                         _           -> [identToPHP arg]
-        return $ PFunction Nothing Nothing phpArg ret -- (PBlock Nothing True [ret])
-      valueToPHP' (Abs _ arg val) = do
-        ret <- valueToPHP val
+            oscope' = updateOScope oscope phpArg
+        ret <- valueToPHP val oscope'
+        return $ PFunction Nothing Nothing phpArg oscope ret -- (PBlock Nothing True [ret])
+      valueToPHP' (Abs _ arg val) oscope = do
         let phpArg = case arg of
                         UnusedIdent -> []
                         _           -> [identToPHP arg]
-        return $ PFunction Nothing Nothing phpArg (PBlock Nothing True [PReturn Nothing ret])
-      valueToPHP' e@App{} = do
+            oscope' = updateOScope oscope phpArg
+        ret <- valueToPHP val oscope'
+        return $ PFunction Nothing Nothing phpArg oscope (PBlock Nothing True [PReturn Nothing ret])
+      valueToPHP' e@App{} oscope = do
         let (f, args) = unApp e []
-        args' <- mapM valueToPHP args
+        args' <- mapM (\v -> valueToPHP v oscope) args
         case f of
           Var (_, _, _, Just IsNewtype) _ -> error "newtype app"
           Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
-          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f
+          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
           unApp other args           = (other, args)
-      valueToPHP' (Var (_, _, _, Just IsForeign) ident) = error "VAr isForeign"
+      valueToPHP' (Var (_, _, _, Just IsForeign) _) _ = error "VAr isForeign"
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
-      valueToPHP' (Var _ ident) = return $ varToPHP ident
-      valueToPHP' (Case (ss, _, _, _) values binders) = do
-        vals <- mapM valueToPHP values
+      valueToPHP' (Var _ ident) _ = return $ varToPHP ident
+      valueToPHP' (Case (ss, _, _, _) values binders) oscope = do
+        vals <- mapM (\v -> valueToPHP v oscope) values
         bindersToPHP ss binders vals
-      valueToPHP' (Let _ ds val) =
-        (\x -> return $ PApp Nothing (PFunction Nothing Nothing [] x) []) =<<
-          (\binds expr -> PBlock Nothing True $ binds ++ [PReturn Nothing expr]) <$> (sequence $ recBinding <$> ds) <*> (valueToPHP' val)
-      valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) =
+      valueToPHP' (Let _ ds val) oscope =
+        (\x -> return $ PApp Nothing (PFunction Nothing Nothing [] [] x) []) =<<
+          (\binds expr -> PBlock Nothing True $ binds ++ [PReturn Nothing expr]) <$> (sequence $ recBinding <$> ds) <*> (valueToPHP' val oscope)
+      valueToPHP' (Constructor (_, _, _, Just IsNewtype) _ ctor _) _ =
         error "Constructor isnewtype"
-      valueToPHP' (Constructor _ _ _ []) =
+      valueToPHP' (Constructor _ _ _ []) _ =
         return $ PUnary Nothing PNew (PClass Nothing Nothing (PBlock Nothing True []))
-      valueToPHP' (Constructor _ _ ctor fields) = do
+      valueToPHP' (Constructor _ _ ctor fields) _ = do
         let vars = map (\v -> PClassVariableIntroduction Nothing (identToPHP v) Nothing) fields
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- fields ]
@@ -310,20 +313,20 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                 in PMethod Nothing ["public", "static"] "create" [identToPHP f] (PBlock Nothing True [PReturn Nothing (body fs)])
         return $ PClass Nothing (Just $ properToPHP ctor) (PBlock Nothing True $ vars <> [constructor, create])
 
-      valueToPHP' e = error $ "valueToPHP' not implemented: " <> show e
+      valueToPHP' e _ = error $ "valueToPHP' not implemented: " <> show e
 
       -- TODO: we probably don't need this
       iife :: Text -> [PHP] -> PHP
-      iife v exprs = PApp Nothing (PFunction Nothing Nothing [] (PBlock Nothing True $ exprs ++ [PReturn Nothing $ PVar Nothing v])) []
+      iife v exprs = PApp Nothing (PFunction Nothing Nothing [] [] (PBlock Nothing True $ exprs ++ [PReturn Nothing $ PVar Nothing v])) []
 
       literalToValuePHP :: SourceSpan -> Literal (Expr Ann) -> m PHP
       literalToValuePHP ss (NumericLiteral n) = return $ PNumericLiteral (Just ss) n
       literalToValuePHP ss (StringLiteral s) = return $ PStringLiteral (Just ss) s
       literalToValuePHP ss (CharLiteral c) = return $ PStringLiteral (Just ss) (fromString [c])
       literalToValuePHP ss (BooleanLiteral b) = return $ PBooleanLiteral (Just ss) b
-      literalToValuePHP ss (ArrayLiteral xs) = PArrayLiteral (Just ss) <$> mapM valueToPHP xs
+      literalToValuePHP ss (ArrayLiteral xs) = PArrayLiteral (Just ss) <$> mapM (\v -> valueToPHP v []) xs
       literalToValuePHP ss (ObjectLiteral ps) = do
-        ret <- mapM (sndM valueToPHP) ps
+        ret <- mapM (sndM (\v -> valueToPHP v [])) ps
         -- TODO this fromMaybe shouldn't be here. i think I'm doing something wrong
         let fields :: [PHP]
             fields = map (\(i', p) -> PAssociativeArrayField (Just ss) (fromMaybe "" $ decodeString i') p) ret
@@ -401,12 +404,12 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           guardsToPHP :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [PHP]
           guardsToPHP (Left gs) = traverse genGuard gs where
             genGuard (cond, val) = do
-              cond' <- valueToPHP cond
-              val' <- valueToPHP val
+              cond' <- valueToPHP cond []
+              val' <- valueToPHP val []
               return
                 (PIfElse Nothing cond'
                   (PBlock Nothing True [PReturn Nothing val']) Nothing)
-          guardsToPHP (Right v) = return . PReturn Nothing <$> valueToPHP v
+          guardsToPHP (Right v) = return . PReturn Nothing <$> valueToPHP v []
 
       binderToPHP :: Text -> [PHP] -> Binder Ann -> m [PHP]
       binderToPHP s done binder =
@@ -500,6 +503,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       --     go other = return other
 
 
+-- | Updates the outer scope when creating a function.
+-- Right now it just appends them.
+updateOScope :: [Text] -> [Text] -> [Text]
+updateOScope = (<>)
 
 
 freshNamePHP :: (MonadSupply m) => m T.Text
