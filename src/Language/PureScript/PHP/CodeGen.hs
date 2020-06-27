@@ -231,10 +231,18 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         return $ qualifiedToPHP id name
       valueToPHP' (Var (_, _, _, Just (IsConstructor _ _)) name) =
         return $ staticAccessorString "create" $ qualifiedToPHP' id name
-      valueToPHP' (Accessor _ prop val) = error "Accessor not implemented"
+      valueToPHP' (Accessor _ prop val) =
+        accessorString prop <$> valueToPHP val
       valueToPHP' (ObjectUpdate _ o ps) = error "Object Update not implemented"
       valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
-        error "Abs TypeClassConstructor"
+        let args = unAbs e
+        in return $ PFunction Nothing Nothing (map identToPHP args) (PBlock Nothing True $ map assign args)
+        where
+          unAbs :: Expr Ann -> [Ident]
+          unAbs (Abs _ arg val) = arg : unAbs val
+          unAbs _ = []
+          assign :: Ident -> PHP
+          assign name = PAssignment Nothing (accessorString (mkString $ runIdent name) (PVar Nothing "this")) (var name)
       valueToPHP' (Abs _ arg val@(Case _ _ _)) = do
         ret <- valueToPHP val
         let phpArg = case arg of
@@ -255,7 +263,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
-            error "typeclass constructor"
+            return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP id name) args'
           _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
