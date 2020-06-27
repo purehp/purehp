@@ -14,13 +14,16 @@ class Foo {
         return new self($value0);
     }
 }
-$Functor = function ($map) {
-    $this->map = $map;
-};
+class Functor {
+    var $map;
+    public function __construct($map) {
+        $this->map = $map;
+    }
+}
 $map = function ($dict) {
     return $dict->map;
 };
-$functorFoo = new $Functor(function ($f) {
+$functorFoo = new Functor(function ($f) {
     return function ($v) {
         $__0 = $f;
         $__1 = $v;

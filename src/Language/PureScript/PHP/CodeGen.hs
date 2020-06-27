@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE GADTs             #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
@@ -10,6 +11,7 @@ module Language.PureScript.PHP.CodeGen
   , moduleToPHP
   ) where
 
+import           Debug.Trace
 import           Debugger
 import           Prelude.Compat
 import           Protolude                                 (ordNub)
@@ -47,13 +49,13 @@ import           Language.PureScript.AST.SourcePos
 import qualified Language.PureScript.Constants             as C
 import           Language.PureScript.CoreFn                hiding
                                                             (moduleExports)
+import           Language.PureScript.CST.Utils             (internalError)
 import           Language.PureScript.Environment           as E
 import           Language.PureScript.Errors                (ErrorMessageHint (..))
 import           Language.PureScript.Names
 import           Language.PureScript.Options
 import           Language.PureScript.Traversals            (sndM)
 import           Language.PureScript.Types
-import Language.PureScript.CST.Utils (internalError)
 
 import           Language.PureScript.PHP.CodeGen.AST       (PHP,
                                                             everywhereTopDownM,
@@ -67,7 +69,9 @@ import           Language.PureScript.PHP.Errors            (MultipleErrors,
                                                             rethrow,
                                                             rethrowWithPosition)
 import           Language.PureScript.PHP.Errors.Types
-import           Language.PureScript.PSString              (PSString, mkString, decodeString)
+import           Language.PureScript.PSString              (PSString,
+                                                            decodeString,
+                                                            mkString)
 
 import           Debug.Trace                               (traceM)
 
@@ -145,12 +149,12 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         where
           goExpr :: Expr a -> Expr a
           goExpr (Var ann q) = Var ann (renameQual q)
-          goExpr e = e
+          goExpr e           = e
           goBinder :: Binder a -> Binder a
           goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
           goBinder b = b
           renameQual :: Qualified a -> Qualified a
-          renameQual (Qualified (Just mn') a) = 
+          renameQual (Qualified (Just mn') a) =
             let (_,mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
             in Qualified (Just mnSafe) a
           renameQual q = q
@@ -170,22 +174,25 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- declaration.
       --
       -- The main purpose of this function is to handle code generation for comments.
-      nonRecToPHP :: Ann -> Ident -> Expr Ann -> m PHP
+      nonRecToPHP :: (MonadError MultipleErrors m, MonadReader Options m) => Ann -> Ident -> Expr Ann -> m PHP
       nonRecToPHP a i e@(extractAnn -> (_, com, _, _))
         | not (null com) = do
             withoutComment <- asks optionsNoComments
             if withoutComment
               then nonRecToPHP a i (modifyAnn removeComments e)
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
-      nonRecToPHP (ss, _, _, _) ident val@(Constructor _ _ _ fields)
+      nonRecToPHP (ss, _, _, _) _ val@(Constructor _ _ _ fields)
         | fields /= [] = do
           php <- valueToPHP val
           withPos ss php
+      nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
+        php <- valueToPHP val
+        withPos ss (PClass Nothing (Just $ runIdent ident) php)
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val
         withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
 
-      withPos :: SourceSpan -> PHP -> m PHP
+      withPos :: MonadReader Options m => SourceSpan -> PHP -> m PHP
       withPos ss php = do
         withSM <- asks (elem JSSourceMap . optionsCodegenTargets)
         return $ if withSM
@@ -204,9 +211,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- a PureScript identifier. If the name is not valid in PHP (symbol based, reserved name) an
       -- indexer is returned.
       accessor :: Ident -> PHP -> PHP
-      accessor (Ident prop) = accessorString $ mkString prop
+      accessor (Ident prop)   = accessorString $ mkString prop
       accessor (GenIdent _ _) = internalError "GenIdent in accessor"
-      accessor UnusedIdent = internalError "UnusedIdent in accessor"
+      accessor UnusedIdent    = internalError "UnusedIdent in accessor"
 
       accessorString :: PSString -> PHP -> PHP
       accessorString prop = PIndexer Nothing (PStringLiteral Nothing prop)
@@ -214,17 +221,17 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       staticAccessorString :: PSString -> PHP -> PHP
       staticAccessorString prop = PStaticIndexer Nothing (PStringLiteral Nothing prop)
 
-      recBinding :: Bind Ann -> m PHP
+      recBinding :: (Monad m) => Bind Ann -> m PHP
       recBinding (NonRec _ (Ident name) expr) = (return . PVariableIntroduction Nothing name) =<< (Just <$> valueToPHP' expr)
       recBinding _                            = error "only nonrecursive alphanumeric identifiers are allowed in let bindings for the moment"
 
       -- | Generate code in the simplified PHP intermediate representation fora value or expression.
-      valueToPHP :: Expr Ann -> m PHP
+      valueToPHP :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> m PHP
       valueToPHP e =
         let (ss, _, _, _) = extractAnn e in
           withPos ss =<< valueToPHP' e
 
-      valueToPHP' :: Expr Ann -> m PHP
+      valueToPHP' :: (MonadError MultipleErrors m, MonadReader Options m) => Expr Ann -> m PHP
       valueToPHP' (Literal (pos, _, _, _) l) =
         rethrowWithPosition pos $ literalToValuePHP pos l
       valueToPHP' (Var (_, _, _, Just (IsConstructor _ [])) name) =
@@ -236,14 +243,19 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       valueToPHP' (ObjectUpdate _ o ps) = error "Object Update not implemented"
       valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
         let args = unAbs e
-        in return $ PFunction Nothing Nothing (map identToPHP args) (PBlock Nothing True $ map assign args)
+            vars = map assign args
+            constructor =
+              let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- args ]
+              in PMethod Nothing ["public"] "__construct" (identToPHP `map` args) (PBlock Nothing True body)
+        in return $ PBlock Nothing True (vars <> [constructor])
+        -- in return $ PFunction Nothing Nothing (map identToPHP args) (PBlock Nothing True $ map assign args)
         where
           unAbs :: Expr Ann -> [Ident]
           unAbs (Abs _ arg val) = arg : unAbs val
-          unAbs _ = []
+          unAbs _               = []
           assign :: Ident -> PHP
-          assign name = PAssignment Nothing (accessorString (mkString $ runIdent name) (PVar Nothing "this")) (var name)
-      valueToPHP' (Abs _ arg val@(Case _ _ _)) = do
+          assign name = PClassVariableIntroduction Nothing (runIdent name) Nothing
+      valueToPHP' (Abs _ arg val@Case{}) = do
         ret <- valueToPHP val
         let phpArg = case arg of
                         UnusedIdent -> []
@@ -263,12 +275,12 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
-            return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP id name) args'
+            return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
-          unApp other args = (other, args)
+          unApp other args           = (other, args)
       valueToPHP' (Var (_, _, _, Just IsForeign) ident) = error "VAr isForeign"
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
@@ -330,17 +342,17 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- variable.
       varToPHP :: Qualified Ident -> PHP
       varToPHP (Qualified Nothing ident) = var ident
-      varToPHP qual = qualifiedToPHP id qual
+      varToPHP qual                      = qualifiedToPHP id qual
 
       varToPHP' :: Qualified Ident -> PHP
       varToPHP' (Qualified Nothing ident) = var' ident
-      varToPHP' qual = qualifiedToPHP' id qual
+      varToPHP' qual                      = qualifiedToPHP' id qual
 
       -- | Generate code in the simplified PHP intermediate representation for a refrence to a
       -- variable that may have a qualified name.
       qualifiedToPHP :: (a -> Ident) -> Qualified a -> PHP
       qualifiedToPHP f (Qualified (Just C.Prim) a) = PVar Nothing . runIdent $ f a
-      qualifiedToPHP f (Qualified (Just mn') a) 
+      qualifiedToPHP f (Qualified (Just mn') a)
         | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
       qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
 
@@ -479,7 +491,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       --       -- the value is `Unary Negate (NumericLiteral (Left 2147483648))`, and
       --       -- 2147483648 is larger than the maximum allowed int.
       --       return $ PNumericLiteral ss (Left (-i))
-      --     go php@(PNumericLiteral ss (Left i)) = 
+      --     go php@(PNumericLiteral ss (Left i)) =
       --       let minInt = -2147483648
       --           maxInt = 2147483647
       --       in if i < minInt || i > maxInt
@@ -487,7 +499,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       --         else return php
       --     go other = return other
 
-      
+
 
 
 freshNamePHP :: (MonadSupply m) => m T.Text
