@@ -6,6 +6,8 @@ declare(strict_types=1);
 
 namespace \Data;
 
-$foo = 1;
+class NamespaceTest {
+    $foo = 1;
+}
 
 ?>

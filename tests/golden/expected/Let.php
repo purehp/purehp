@@ -6,9 +6,11 @@ declare(strict_types=1);
 
 
 
-$foo = (function () {
-    $a = 1;
-    return $a;
-})();
+class Let {
+    $foo = (function () {
+        $a = 1;
+        return $a;
+    })();
+}
 
 ?>

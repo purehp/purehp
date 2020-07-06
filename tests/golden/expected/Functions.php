@@ -6,8 +6,10 @@ declare(strict_types=1);
 
 
 
-$fun1 = function ($arg) {
-    return $arg;
-};
+class Functions {
+    $fun1 = function ($arg) {
+        return $arg;
+    };
+}
 
 ?>
