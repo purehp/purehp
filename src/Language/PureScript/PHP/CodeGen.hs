@@ -111,7 +111,6 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         moduleBody = phpImports ++ [moduleClass]
         -- foreignExps = exps `intersect` foreigns // module.exports ...
         -- standardExps = exps \\ foreignExps
-    traceShowIdPP moduleBody
     return moduleBody
 
     where
