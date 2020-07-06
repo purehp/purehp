@@ -87,11 +87,16 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
     let usedNames = concatMap getNames decls
         mnLookup = renameImports usedNames imps
         decls' = renameModules mnLookup decls
+        (_, moduleName) = moduleNameToPHP mn
+    -- Convert to PHP
     phpDecls <- mapM bindToPHP decls'
-    -- pureerl does the reexports stuff here
+    -- Wrap everything in the main class
+    -- TODO should the optimize step run before or after wrapping in the module class?
+
     optimized <- traverse (traverse optimize) phpDecls
     let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToPHP safeName, origName)) $ M.toList mnLookup
-        usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
+        -- TODO what's this for?
+        usedModuleNames = S.empty -- foldMap (foldMap (findModules mnReverseLookup)) optimized
     phpImports <- traverse (importToPHP mnLookup)
                   . filter (flip S.member usedModuleNames)
                   . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
@@ -102,9 +107,11 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
     --     phpTagClose = PStringLiteral Nothing "?>"
         --header = if comments && not (null coms) then PComment Nothing coms strict else strict
         --foreign'
-    let moduleBody = phpImports ++ concat optimized
+    let moduleClass = PClass Nothing (Just moduleName) (PBlock Nothing True $ concat optimized)
+        moduleBody = phpImports ++ [moduleClass]
         -- foreignExps = exps `intersect` foreigns // module.exports ...
         -- standardExps = exps \\ foreignExps
+    traceShowIdPP moduleBody
     return moduleBody
 
     where
@@ -355,16 +362,18 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- variable that may have a qualified name.
       qualifiedToPHP :: (a -> Ident) -> Qualified a -> PHP
       qualifiedToPHP f (Qualified (Just C.Prim) a) = PVar Nothing . runIdent $ f a
-      qualifiedToPHP f (Qualified (Just mn') a)
-        | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
+      -- TODO changed moduleNameToPHP
+      -- qualifiedToPHP f (Qualified (Just mn') a)
+      --   | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
       qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
 
       -- | Same as qualifiedToPHP, but generates PVar' (no $)
       -- TODO: This might need to be reworked in the future
       qualifiedToPHP' :: (a -> Ident) -> Qualified a -> PHP
       qualifiedToPHP' f (Qualified (Just C.Prim) a) = PVar' Nothing . runIdent $ f a
-      qualifiedToPHP' f (Qualified (Just mn') a)
-        | mn /= mn' = accessor (f a) (PVar' Nothing (moduleNameToPHP mn'))
+      -- TODO changed moduleNametoPHP
+      -- qualifiedToPHP' f (Qualified (Just mn') a)
+      --   | mn /= mn' = accessor (f a) (PVar' Nothing (moduleNameToPHP mn'))
       qualifiedToPHP' f (Qualified _ a) = PVar' Nothing $ identToPHP (f a)
 
       foreignIdent :: Ident -> PHP

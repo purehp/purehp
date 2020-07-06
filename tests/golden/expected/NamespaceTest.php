@@ -4,10 +4,8 @@
  */
 declare(strict_types=1);
 
+namespace \Data;
 
-
-$fun1 = function ($arg) {
-    return $arg;
-};
+$foo = 1;
 
 ?>

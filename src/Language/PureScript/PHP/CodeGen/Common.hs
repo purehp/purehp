@@ -17,13 +17,13 @@ import           Language.PureScript.Names
 phpPrefix :: Text
 phpPrefix = "__"
 
--- | Creates a PHP module name
--- TODO: we should separate between "namespace" module name and "file" module name
--- Also Add some kind of prefix for Foreign Modules.
-moduleNameToPHP :: ModuleName -> Text
+-- | Creates a PHP module name, returning a tuple (Namespace, Classname)
+-- TODO: find a more performant version?
+moduleNameToPHP :: ModuleName -> ([Text], Text)
 moduleNameToPHP (ModuleName mn) =
-  let name = T.replace "." "\\" mn
-  in if nameIsPHPBuiltIn name then phpPrefix <> name else name
+  case reverse $ T.splitOn "." mn of
+    [] -> error "Shouldn't happen."
+    (h:tl) -> (reverse tl, if nameIsPHPBuiltIn h then phpPrefix <> h else h)
 
 -- | Convert an 'Ident' into a valid PHP identifier:
 --
