@@ -7,7 +7,9 @@ declare(strict_types=1);
 namespace \Data;
 
 class NamespaceTest {
-    $foo = 1;
+    public function __construct() {
+        $this->foo = 1;
+    }
 }
 
 ?>

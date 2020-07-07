@@ -7,9 +7,11 @@ declare(strict_types=1);
 
 
 class Functions {
-    $fun1 = function ($arg) {
-        return $arg;
-    };
+    public function __construct() {
+        $this->fun1 = function ($arg) { // TODO leave here or move to a static function?
+            return $arg;
+        };
+    }
 }
 
 ?>

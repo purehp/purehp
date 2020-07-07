@@ -20,7 +20,7 @@ import           Language.PureScript.PHP.CodeGen.AST       as AST
 
 import           Control.Monad                             (replicateM, unless)
 import qualified Data.Foldable                             as F
-import           Data.List                                 (intersect, (\\))
+import           Data.List                                 (intersect, (\\), partition)
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
 import           Data.Traversable
@@ -90,30 +90,40 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         (_, moduleName) = moduleNameToPHP mn
     -- Convert to PHP
     phpDecls <- mapM bindToPHP decls'
-    -- Wrap everything in the main class
     -- TODO should the optimize step run before or after wrapping in the module class?
-
-    optimized <- traverse (traverse optimize) phpDecls
+    -- optimized <- traverse (traverse optimize) phpDecls
     let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToPHP safeName, origName)) $ M.toList mnLookup
         -- TODO what's this for?
         usedModuleNames = S.empty -- foldMap (foldMap (findModules mnReverseLookup)) optimized
     phpImports <- traverse (importToPHP mnLookup)
                   . filter (flip S.member usedModuleNames)
                   . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
-    F.traverse_ (F.traverse_ checkIntegers) optimized
+    -- This check was on optimized before
+    F.traverse_ (F.traverse_ checkIntegers) phpDecls -- optimized
     -- TODO: reimplement this
     comments <- not <$> asks optionsNoComments
-    -- let phpTagOpen = PStringLiteral Nothing "<?php"
-    --     phpTagClose = PStringLiteral Nothing "?>"
         --header = if comments && not (null coms) then PComment Nothing coms strict else strict
         --foreign'
-    let moduleClass = PClass Nothing (Just moduleName) (PBlock Nothing True $ concat optimized)
-        moduleBody = phpImports ++ [moduleClass]
+    -- TODO grab all top level class assignments and wrap them in the constructor
+    let
+      -- Partition declaration between vars and functions
+      (phpVars, phpFuncs) = partition isPhpAssign $ concat phpDecls
+      -- Convert vars to class assignment
+      phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
+
+    traceShowIdPP phpDecls
+    moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True $ phpConstr : phpFuncs)
+    let moduleBody = phpImports ++ [moduleClass]
         -- foreignExps = exps `intersect` foreigns // module.exports ...
         -- standardExps = exps \\ foreignExps
     return moduleBody
 
     where
+
+      -- | Checks whether the value is a PAssignment
+      isPhpAssign :: PHP -> Bool
+      isPhpAssign (PAssignment _ _ _) = True
+      isPhpAssign _ = False
 
       -- | Extracts all declaration names from a binding group.
       getNames :: Bind Ann -> [Ident]
@@ -174,19 +184,32 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
 
       -- | Generate code in the simplified PHP intermediate representation for a declaration
       bindToPHP (NonRec ann ident val) = return <$> nonRecToPHP ann ident val
+      -- TODO we don't have any Rec match so far, so it's probably broken.
       bindToPHP (Rec vals) = forM vals (uncurry . uncurry $ nonRecToPHP)
 
-      -- | Generate code in the simplified PHP intermediate representation fora single non-recurtsive
+
+
+      -- | Generate code in the simplified PHP intermediate representation fora single non-recursive
       -- declaration.
-      --
-      -- The main purpose of this function is to handle code generation for comments.
+      -- Top level bindings need to be handled specifically. All constant declarations (i.e. vars) have
+      -- to live inside the constructor, while the rest has to be defined as a public static function.
+
+      -- TODO: this has to be rewritten since top level bindings will have to be treated differently depending on what they are,
+      -- considering that they are now wrapped in a class.
+      -- literals (except records) -> PClassVariableIntroduction
+      -- records public static functions returning the previous implementation
+      -- constructors one public static function when args == 0 (or <= 1 ?), two otherwise
+      -- typeclasses?
+      -- anything which will be converted to a function
       nonRecToPHP :: (MonadError MultipleErrors m, MonadReader Options m) => Ann -> Ident -> Expr Ann -> m PHP
+      -- handle comments?
       nonRecToPHP a i e@(extractAnn -> (_, com, _, _))
         | not (null com) = do
             withoutComment <- asks optionsNoComments
             if withoutComment
               then nonRecToPHP a i (modifyAnn removeComments e)
               else PComment Nothing com <$> nonRecToPHP a i (modifyAnn removeComments e)
+      -- literals
       nonRecToPHP (ss, _, _, _) _ val@(Constructor _ _ _ fields)
         | fields /= [] = do
           php <- valueToPHP val []
@@ -194,9 +217,11 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
         php <- valueToPHP val []
         withPos ss (PClass Nothing (Just $ runIdent ident) php)
+      -- Wrap all variables into an assignment
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val []
-        withPos ss $ PVariableIntroduction Nothing (identToPHP ident) (Just php)
+        withPos ss $ PAssignment Nothing ((accessorString $ mkString $ identToPHP ident) (PVar Nothing "this")) php
+        -- withPos ss $ PClassVariableIntroduction Nothing (identToPHP ident) (Just php)
 
       withPos :: MonadReader Options m => SourceSpan -> PHP -> m PHP
       withPos ss php = do
@@ -210,6 +235,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       var :: Ident -> PHP
       var = PVar Nothing . identToPHP
 
+      -- | Generate a non $ variable.
       var' :: Ident -> PHP
       var' = PVar' Nothing . identToPHP
 

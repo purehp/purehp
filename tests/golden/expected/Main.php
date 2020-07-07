@@ -7,7 +7,9 @@ declare(strict_types=1);
 
 
 class Main {
+    public function __construct() {
 
+    }
 }
 
 ?>

@@ -7,13 +7,18 @@ declare(strict_types=1);
 
 
 class DataConstructors {
-    $NewFoo = function ($x) {
-        return $x;
-    };
-    $A = new class {
+    public function __construct() {
+        $this->NewFoo = function ($x) {
+            return $x;
+        };
+        $this->A = new class { // TODO This has to become a public static function
 
-    };
-    class B {
+        };
+        $this->bar3 = B::create(1)(2);
+        $this->bar2 = new B(1, 2, 3);
+        $this->bar1 = $A; // TODO This has to become $this::A().
+    }
+    class B { // This has to become two public static functions
         var $value0;
         var $value1;
         var $value2;
@@ -28,9 +33,6 @@ class DataConstructors {
                     new self($value0, $value1, $value2);
         }
     }
-    $bar3 = B::create(1)(2);
-    $bar2 = new B(1, 2, 3);
-    $bar1 = $A;
 }
 
 ?>

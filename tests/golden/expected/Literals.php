@@ -7,14 +7,16 @@ declare(strict_types=1);
 
 
 class Literals {
-    $string1 = "Hello World!";
-    $rec1 = (object) ['x' => 1, 'y' => "Hello", 'z' => function ($x) {
-        return $x;
-    }];
-    $int1 = 5;
-    $int2 = $int1;
-    $char1 = "C";
-    $array1 = [1, 2, 3, 4];
+    public function __construct() {
+        $this->string1 = "Hello World!";
+        $this->rec1 = (object) ['x' => 1, 'y' => "Hello", 'z' => function ($x) {
+            return $x;
+        }];
+        $this->int1 = 5;
+        $this->int2 = $int1; // TODO this needs to be changed to $this->int1;
+        $this->char1 = "C";
+        $this->array1 = [1, 2, 3, 4];
+    }
 }
 
 ?>

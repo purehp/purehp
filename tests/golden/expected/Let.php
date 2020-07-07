@@ -7,10 +7,12 @@ declare(strict_types=1);
 
 
 class Let {
-    $foo = (function () {
-        $a = 1;
-        return $a;
-    })();
+    public function __construct() {
+        $this->foo = (function () { // TODO should this remain like this or become a function?
+            $a = 1;
+            return $a;
+        })();
+    }
 }
 
 ?>

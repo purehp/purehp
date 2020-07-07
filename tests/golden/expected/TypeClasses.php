@@ -7,6 +7,26 @@ declare(strict_types=1);
 
 
 class TypeClasses {
+    public function __construct() {
+        $this->map = function ($dict) {
+            return $dict->map;
+        };
+        $this->functorFoo = new Functor(function ($f) {
+            return function ($v) use ($f) {
+                $__0 = $f;
+                $__1 = $v;
+                $f1 = $__0;
+                $__2 = $__1->value0;
+                $i = $__2;
+                return new Foo($f1($i));
+                throw new $Error("Failed pattern match at TypeClasses (line 8, column 1 - line 9, column 28): " + [$__0->constructor->name, $__1->constructor->name]);
+            };
+        });
+        $this->bar = $map($functorFoo)(function ($v) {
+            return 2;
+        });
+        $this->baz = $bar(new Foo(1));
+    }
     class Foo {
         var $value0;
         public function __construct($value0) {
@@ -22,24 +42,6 @@ class TypeClasses {
             $this->map = $map;
         }
     }
-    $map = function ($dict) {
-        return $dict->map;
-    };
-    $functorFoo = new Functor(function ($f) {
-        return function ($v) use ($f) {
-            $__0 = $f;
-            $__1 = $v;
-            $f1 = $__0;
-            $__2 = $__1->value0;
-            $i = $__2;
-            return new Foo($f1($i));
-            throw new $Error("Failed pattern match at TypeClasses (line 8, column 1 - line 9, column 28): " + [$__0->constructor->name, $__1->constructor->name]);
-        };
-    });
-    $bar = $map($functorFoo)(function ($v) {
-        return 2;
-    });
-    $baz = $bar(new Foo(1));
 }
 
 ?>
