@@ -42,7 +42,6 @@ main :: IO TestTree
 main = do
   let buildOutputDir = "output"
       coreFnGlob = joinPath [ "tests", "golden", "output", "**", "corefn.json" ]
-  traceShowIdPP coreFnGlob
   corefnFiles <- globWarningOnMisses warnFileTypeNotFound [coreFnGlob]
   res :: (Either MultipleErrors [[TestTree]], MultipleErrors) <- MM.runMake P.defaultOptions $ do
     modules <- forM corefnFiles $ \corefn -> do

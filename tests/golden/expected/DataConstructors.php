@@ -8,17 +8,17 @@ declare(strict_types=1);
 
 class DataConstructors {
     public function __construct() {
-        $this->NewFoo = function ($x) {
-            return $x;
-        };
-        $this->A = new class { // TODO This has to become a public static function
+        $this->A = new class {
 
         };
         $this->bar3 = B::create(1)(2);
         $this->bar2 = new B(1, 2, 3);
-        $this->bar1 = $A; // TODO This has to become $this::A().
+        $this->bar1 = $A;
     }
-    class B { // This has to become two public static functions
+    public static function NewFoo($x) {
+        return $x;
+    }
+    class B {
         var $value0;
         var $value1;
         var $value2;

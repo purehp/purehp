@@ -4,14 +4,14 @@
  */
 declare(strict_types=1);
 
+namespace \Functions;
 
-
-class Let {
+class Inner {
     public function __construct() {
-        $this->foo = (function () {
-            $a = 1;
-            return $a;
-        })();
+
+    }
+    public static function fun3($x) {
+        return $x;
     }
 }
 

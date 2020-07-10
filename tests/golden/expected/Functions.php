@@ -8,8 +8,11 @@ declare(strict_types=1);
 
 class Functions {
     public function __construct() {
-        $this->fun1 = function ($arg) { // TODO leave here or move to a static function?
-            return $arg;
+        $this->foo = self->TEST = $fun2;(1)(2);
+    }
+    public static function fun2($v) {
+        return function ($b) use ($v) {
+            return $b;
         };
     }
 }

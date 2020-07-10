@@ -8,9 +8,6 @@ declare(strict_types=1);
 
 class TypeClasses {
     public function __construct() {
-        $this->map = function ($dict) {
-            return $dict->map;
-        };
         $this->functorFoo = new Functor(function ($f) {
             return function ($v) use ($f) {
                 $__0 = $f;
@@ -36,11 +33,11 @@ class TypeClasses {
             return new self($value0);
         }
     }
-    class Functor {
-        var $map;
-        public function __construct($map) {
-            $this->map = $map;
-        }
+    public static function Functor($map) {
+        return (object) ['map' => $map];
+    }
+    public static function map($dict) {
+        return $dict->map;
     }
 }
 

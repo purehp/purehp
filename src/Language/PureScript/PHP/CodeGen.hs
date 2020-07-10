@@ -111,7 +111,6 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- Convert vars to class assignment
       phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
 
-    traceShowIdPP phpDecls
     moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True $ phpConstr : phpFuncs)
     let moduleBody = phpImports ++ [moduleClass]
         -- foreignExps = exps `intersect` foreigns // module.exports ...
@@ -214,10 +213,17 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         | fields /= [] = do
           php <- valueToPHP val []
           withPos ss php
-      nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
-        php <- valueToPHP val []
-        withPos ss (PClass Nothing (Just $ runIdent ident) php)
-      -- Wrap all variables into an assignment
+      -- nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
+      --   php <- valueToPHP val []
+      --   withPos ss (PClass Nothing (Just $ runIdent ident) php)
+      nonRecToPHP (ss, _, _, _) ident (Abs _ arg val) = do
+        let phpArg = case arg of
+              UnusedIdent -> []
+              _           -> [identToPHP arg]
+            oscope = updateOScope [] phpArg
+        ret <- valueToPHP val oscope
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
+
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val []
         withPos ss $ PAssignment Nothing ((accessorString $ mkString $ identToPHP ident) (PVar Nothing "this")) php
@@ -303,14 +309,20 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         ret <- valueToPHP val oscope'
         return $ PFunction Nothing Nothing phpArg oscope (PBlock Nothing True [PReturn Nothing ret])
       valueToPHP' e@App{} oscope = do
+        traceShowIdPP "HERE"
         let (f, args) = unApp e []
         args' <- mapM (\v -> valueToPHP v oscope) args
+        traceShowIdPP f
+        traceShowIdPP args
+        traceShowIdPP args'
         case f of
           Var (_, _, _, Just IsNewtype) _ -> error "newtype app"
           Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
+          -- TODO this here is application. needs to become self::func (or class::func if foreign?)
+          -- _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> (PAssignment Nothing ((accessorString $ "TEST") (PVar' Nothing "self")) <$> (valueToPHP f oscope))
           _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
@@ -330,6 +342,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         error "Constructor isnewtype"
       valueToPHP' (Constructor _ _ _ []) _ =
         return $ PUnary Nothing PNew (PClass Nothing Nothing (PBlock Nothing True []))
+      -- TODO: this has to return the double constructors
       valueToPHP' (Constructor _ _ ctor fields) _ = do
         let vars = map (\v -> PClassVariableIntroduction Nothing (identToPHP v) Nothing) fields
             constructor =
