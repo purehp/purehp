@@ -6,9 +6,11 @@ declare(strict_types=1);
 
 
 
+$__Functions_Inner = new \Functions\Inner();
 class Functions {
     public function __construct() {
-        $this->foo = self->TEST = $fun2;(1)(2);
+        $this->foo = self::fun2(1)(2);
+        $this->bar = $__Functions_Inner->fun3(5);
     }
     public static function fun2($v) {
         return function ($b) use ($v) {

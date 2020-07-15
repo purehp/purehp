@@ -1,6 +1,6 @@
 module Functions where
 
--- import Functions.Inner (fun3)
+import Functions.Inner (fun3)
 -- import Functions.Inner as FI
 
 -- val1 :: Int
@@ -21,8 +21,8 @@ foo = fun2 1 2
 -- baz2 :: Int
 -- baz2 = bar
 
--- bar :: Int
--- bar = fun3 5
+bar :: Int
+bar = fun3 5
 
 -- quux :: Int
 -- quux = FI.fun3 10

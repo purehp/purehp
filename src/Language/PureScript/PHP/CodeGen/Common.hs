@@ -23,7 +23,21 @@ moduleNameToPHP :: ModuleName -> ([Text], Text)
 moduleNameToPHP (ModuleName mn) =
   case reverse $ T.splitOn "." mn of
     [] -> error "Shouldn't happen."
+    -- TODO are we really allowed to prefix the module names here?
     (h:tl) -> (reverse tl, if nameIsPHPBuiltIn h then phpPrefix <> h else h)
+
+-- | This one flattens the name
+-- TODO: temp, can we find something better ?
+moduleNameToFlatPHP :: ModuleName -> Text
+moduleNameToFlatPHP mn =
+  let (ns, n) = moduleNameToPHP mn
+  in T.intercalate "\\" (ns ++ [n])
+
+-- TODO: temp
+moduleNameToVariablePHP :: ModuleName -> Text
+moduleNameToVariablePHP mn =
+  let (ns, n) = moduleNameToPHP mn
+  in "__" <> (T.intercalate "_" (ns ++ [n]))
 
 -- | Convert an 'Ident' into a valid PHP identifier:
 --

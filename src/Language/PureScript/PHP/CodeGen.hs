@@ -20,7 +20,8 @@ import           Language.PureScript.PHP.CodeGen.AST       as AST
 
 import           Control.Monad                             (replicateM, unless)
 import qualified Data.Foldable                             as F
-import           Data.List                                 (intersect, (\\), partition)
+import           Data.List                                 (intersect,
+                                                            partition, (\\))
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
 import           Data.Traversable
@@ -43,6 +44,8 @@ import           Data.String                               (fromString)
 
 import           Control.Monad.Supply.Class
 
+import           Debug.Trace                               (traceM)
+import qualified Language.PureScript                       as P
 import           Language.PureScript.AST                   (SourceSpan,
                                                             nullSourceSpan)
 import           Language.PureScript.AST.SourcePos
@@ -54,9 +57,6 @@ import           Language.PureScript.Environment           as E
 import           Language.PureScript.Errors                (ErrorMessageHint (..))
 import           Language.PureScript.Names
 import           Language.PureScript.Options
-import           Language.PureScript.Traversals            (sndM)
-import           Language.PureScript.Types
-
 import           Language.PureScript.PHP.CodeGen.AST       (PHP,
                                                             everywhereTopDownM,
                                                             withSourceSpan)
@@ -72,8 +72,9 @@ import           Language.PureScript.PHP.Errors.Types
 import           Language.PureScript.PSString              (PSString,
                                                             decodeString,
                                                             mkString)
-
-import           Debug.Trace                               (traceM)
+import           Language.PureScript.Traversals            (sndM)
+import           Language.PureScript.Types
+import           System.FilePath.Posix                     ((</>))
 
 
 moduleToPHP
@@ -90,31 +91,32 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         (_, moduleName) = moduleNameToPHP mn
     -- Convert to PHP
     phpDecls <- mapM bindToPHP decls'
-    -- TODO should the optimize step run before or after wrapping in the module class?
-    -- optimized <- traverse (traverse optimize) phpDecls
-    let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToPHP safeName, origName)) $ M.toList mnLookup
-        -- TODO what's this for?
-        usedModuleNames = S.empty -- foldMap (foldMap (findModules mnReverseLookup)) optimized
+    optimized <- traverse (traverse optimize) phpDecls
+    let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToFlatPHP safeName, origName)) $ M.toList mnLookup
+        -- TODO temp implementation pulling everything, fix!
+        usedModuleNames = S.fromList $ map (\(_, (_, safeName)) -> safeName) $ M.toList mnLookup
+        -- usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
     phpImports <- traverse (importToPHP mnLookup)
                   . filter (flip S.member usedModuleNames)
                   . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
     -- This check was on optimized before
-    F.traverse_ (F.traverse_ checkIntegers) phpDecls -- optimized
+    F.traverse_ (F.traverse_ checkIntegers) optimized
     -- TODO: reimplement this
     comments <- not <$> asks optionsNoComments
         --header = if comments && not (null coms) then PComment Nothing coms strict else strict
         --foreign'
-    -- TODO grab all top level class assignments and wrap them in the constructor
     let
       -- Partition declaration between vars and functions
-      (phpVars, phpFuncs) = partition isPhpAssign $ concat phpDecls
+      (phpVars, phpFuncs) = partition isPhpAssign $ concat optimized
       -- Convert vars to class assignment
       phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
 
+    -- TODO do we need to handle reexports?
+    -- foreignExps = exps `intersect` foreigns // module.exports ...
+    -- standardExps = exps \\ foreignExps
     moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True $ phpConstr : phpFuncs)
     let moduleBody = phpImports ++ [moduleClass]
-        -- foreignExps = exps `intersect` foreigns // module.exports ...
-        -- standardExps = exps \\ foreignExps
+
     return moduleBody
 
     where
@@ -122,7 +124,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- | Checks whether the value is a PAssignment
       isPhpAssign :: PHP -> Bool
       isPhpAssign (PAssignment _ _ _) = True
-      isPhpAssign _ = False
+      isPhpAssign _                   = False
 
       -- | Extracts all declaration names from a binding group.
       getNames :: Bind Ann -> [Ident]
@@ -153,7 +155,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- | Generates PHP code for a module import, binding the required module
       -- to the alternative
       importToPHP :: M.Map ModuleName (Ann, ModuleName) -> ModuleName -> m PHP
-      importToPHP _ _ = error "Implement importToPHP"
+      importToPHP mnLookup mn' = do
+        let ((ss, _, _ ,_), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+        -- TODO should we check for used identifiers and generate fresh ones? how does js manage this?
+        withPos ss $ PVariableIntroduction Nothing (moduleNameToVariablePHP mnSafe) $ Just (PUnary Nothing PNew $ PApp Nothing (PVar' Nothing $ "\\" <> moduleNameToFlatPHP mnSafe) [])
 
       -- | Replaces the `ModuleName`s in the AST so that the generated code referes to
       -- the collision-avoiding renamed module imports.
@@ -175,6 +180,8 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           renameQual q = q
 
       -- | Find the set of ModuleNames -> PHP -> S.Set ModuleName
+      -- TODO the problem is that this searches on PVar, which is not good for us.
+      -- Would it be ok for it to search for PApp s ?
       findModules :: M.Map Text ModuleName -> PHP -> S.Set ModuleName
       findModules mnReverseLookup = PHP.everything mappend go
         where
@@ -309,26 +316,34 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         ret <- valueToPHP val oscope'
         return $ PFunction Nothing Nothing phpArg oscope (PBlock Nothing True [PReturn Nothing ret])
       valueToPHP' e@App{} oscope = do
-        traceShowIdPP "HERE"
         let (f, args) = unApp e []
         args' <- mapM (\v -> valueToPHP v oscope) args
-        traceShowIdPP f
-        traceShowIdPP args
-        traceShowIdPP args'
         case f of
           Var (_, _, _, Just IsNewtype) _ -> error "newtype app"
           Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
-          -- TODO this here is application. needs to become self::func (or class::func if foreign?)
-          -- _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> (PAssignment Nothing ((accessorString $ "TEST") (PVar' Nothing "self")) <$> (valueToPHP f oscope))
-          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
+          Var (_, _, _, fr) qi@(Qualified (Just mn') _) -> do
+            f' <- valueToPHP f oscope
+            case f' of
+              -- TODO is this approach too specific here?
+              (PVar _ name) ->
+                case fr of
+                  Just IsForeign -> do
+                    -- TODO here we're skipping the stuff at line 159. IS this a problem?
+                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) (PVar Nothing (moduleNameToVariablePHP mn'))) args'
+                  _ ->
+                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
+              _ -> error "Find ME"
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
           unApp other args           = (other, args)
-      valueToPHP' (Var (_, _, _, Just IsForeign) _) _ = error "VAr isForeign"
+      valueToPHP' (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) _ =
+        return $ if mn' == mn
+                 then foreignIdent mn' ident
+                 else varToPHP qi
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
       valueToPHP' (Var _ ident) _ = return $ varToPHP ident
@@ -414,8 +429,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       --   | mn /= mn' = accessor (f a) (PVar' Nothing (moduleNameToPHP mn'))
       qualifiedToPHP' f (Qualified _ a) = PVar' Nothing $ identToPHP (f a)
 
-      foreignIdent :: Ident -> PHP
-      foreignIdent ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")
+      -- TODO use the module name appropriately.
+      foreignIdent :: P.ModuleName -> Ident -> PHP
+      foreignIdent mn ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")
 
       -- | Generate code in the simplified PHP intermediate representation for a pattern match binders
       -- and guards.
