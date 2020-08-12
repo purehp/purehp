@@ -10,15 +10,11 @@ class Functions {
     public function __construct() {
         $this->scope = ['__Functions_Inner' => new \Functions\Inner()];
         $this->foo = self::fun2(1)(2);
-        // TODO change this call here to use the scope
-        // $this->bar = ($this->scope['Functions\Inner'])->fun3(5);
-        $this->bar = $__Functions_Inner->fun3(5);
+        $this->bar = $this->scope->fun3(5);
     }
     public static function fun2($v) {
         return function ($b) use ($v) {
-            // TODO change this call here to use the scope.
-            // return ($this->scope['Functions\Inner'])->fun3($b);
-            return $__Functions_Inner->fun3($b);
+            return $this->scope->fun3($b);
         };
     }
 }

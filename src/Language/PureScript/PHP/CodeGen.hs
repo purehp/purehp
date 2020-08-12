@@ -344,7 +344,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                 case fr of
                   Just IsForeign -> do
                     -- TODO here we're skipping the stuff at line 159. IS this a problem?
-                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) (PVar Nothing (moduleNameToVariablePHP mn'))) args'
+                    -- TODO: here we need to apply [modulename] to $this->scope, a bit lile PUnary? don't remember if we already were doing this
+                    -- TO: return $this->scope['Functions\Inner']->fun3($b);
+                    -- FROM: return $__Functions_Inner->fun3($b);
+                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) ((accessorString $ fromString "scope") (PVar Nothing "this"))) args'
                   _ ->
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
               _ -> error "Find ME"
