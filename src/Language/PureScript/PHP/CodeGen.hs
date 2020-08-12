@@ -96,7 +96,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         -- TODO temp implementation pulling everything, fix!
         usedModuleNames = S.fromList $ map (\(_, (_, safeName)) -> safeName) $ M.toList mnLookup
         -- usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
-    phpImports <- traverse (importToPHP mnLookup)
+    phpImports <- (importsToPHP mnLookup)
                   . filter (flip S.member usedModuleNames)
                   . (\\ (mn : C.primModules)) $ ordNub $ map snd imps
     -- This check was on optimized before
@@ -107,11 +107,15 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         --foreign'
     let
       -- Partition declaration between vars and functions
-      (phpVars, phpFuncs) = partition isPhpAssign $ concat optimized
-      phpBody = case phpVars of
+      (phpVars', phpFuncs) = partition isPhpAssign $ concat optimized
+      -- If there are imports, we append them to the vars.
+      phpVars = case phpImports of
+        Nothing -> phpVars'
+        Just v -> v : phpVars'
+      phpBody = case (phpVars) of
         -- Empty vars, we don't need a constructor
         [] -> phpFuncs
-        _ -> (PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)) : phpFuncs
+        vars -> (PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True vars)) : phpFuncs
       -- Convert vars to class assignment
       -- phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
 
@@ -119,7 +123,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
     -- foreignExps = exps `intersect` foreigns // module.exports ...
     -- standardExps = exps \\ foreignExps
     moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True phpBody) -- $ phpConstr : phpFuncs)
-    let moduleBody = phpImports ++ [moduleClass]
+    let moduleBody = [moduleClass]
 
     return moduleBody
 
@@ -156,13 +160,17 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
            then freshModuleName (i + 1) mn' used
            else newName
 
-      -- | Generates PHP code for a module import, binding the required module
-      -- to the alternative
-      importToPHP :: M.Map ModuleName (Ann, ModuleName) -> ModuleName -> m PHP
-      importToPHP mnLookup mn' = do
-        let ((ss, _, _ ,_), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-        -- TODO should we check for used identifiers and generate fresh ones? how does js manage this?
-        withPos ss $ PVariableIntroduction Nothing (moduleNameToVariablePHP mnSafe) $ Just (PUnary Nothing PNew $ PApp Nothing (PVar' Nothing $ "\\" <> moduleNameToFlatPHP mnSafe) [])
+      -- | Generates PHP code for all modules import, binding the required module
+      -- to the alternative and Returning a Maybe PHP
+      importsToPHP :: M.Map ModuleName (Ann, ModuleName) -> [ModuleName] -> m (Maybe PHP)
+      importsToPHP mnLookup mns = do
+        fields <- forM mns $ \mn' -> do
+          let ((ss, _, _ ,_), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+          withPos ss $ PAssociativeArrayField Nothing (moduleNameToVariablePHP mnSafe) (PUnary Nothing PNew $ PApp Nothing (PVar' Nothing $ "\\" <> moduleNameToFlatPHP mnSafe) [])
+        case fields of
+          [] -> return Nothing
+          -- TODO: use a function to build the scope accessor.
+          _ -> return $ Just $ PAssignment Nothing ((accessorString $ fromString "scope") (PVar Nothing "this")) (PArrayLiteral Nothing fields)
 
       -- | Replaces the `ModuleName`s in the AST so that the generated code referes to
       -- the collision-avoiding renamed module imports.
