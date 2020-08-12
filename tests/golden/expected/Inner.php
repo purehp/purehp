@@ -7,9 +7,6 @@ declare(strict_types=1);
 namespace \Functions;
 
 class Inner {
-    public function __construct() {
-
-    }
     public static function fun3($x) {
         return $x;
     }

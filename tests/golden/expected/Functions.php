@@ -14,7 +14,7 @@ class Functions {
     }
     public static function fun2($v) {
         return function ($b) use ($v) {
-            return $b;
+            return $__Functions_Inner->fun3($b);
         };
     }
 }

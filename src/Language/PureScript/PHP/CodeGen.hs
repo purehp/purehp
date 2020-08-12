@@ -108,13 +108,17 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
     let
       -- Partition declaration between vars and functions
       (phpVars, phpFuncs) = partition isPhpAssign $ concat optimized
+      phpBody = case phpVars of
+        -- Empty vars, we don't need a constructor
+        [] -> phpFuncs
+        _ -> (PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)) : phpFuncs
       -- Convert vars to class assignment
-      phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
+      -- phpConstr = PMethod Nothing ["public"] "__construct" [] (PBlock Nothing True phpVars)
 
     -- TODO do we need to handle reexports?
     -- foreignExps = exps `intersect` foreigns // module.exports ...
     -- standardExps = exps \\ foreignExps
-    moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True $ phpConstr : phpFuncs)
+    moduleClass <- optimize $ PClass Nothing (Just moduleName) (PBlock Nothing True phpBody) -- $ phpConstr : phpFuncs)
     let moduleBody = phpImports ++ [moduleClass]
 
     return moduleBody

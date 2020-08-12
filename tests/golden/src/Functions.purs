@@ -10,7 +10,7 @@ import Functions.Inner (fun3)
 -- fun1 arg = arg
 
 fun2 :: Int -> Int -> Int
-fun2 _ b = b
+fun2 _ b = fun3 b
 
 -- baz :: Int
 -- baz = foo
