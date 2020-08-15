@@ -4,7 +4,7 @@
  */
 declare(strict_types=1);
 
-namespace \Functions;
+namespace Functions;
 
 class Inner {
     public static function fun3($x) {

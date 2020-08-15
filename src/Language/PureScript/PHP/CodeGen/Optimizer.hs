@@ -1,5 +1,5 @@
 -- |
--- This module optimizes code in the simplified-Erlang intermediate representation.
+-- This module optimizes code in the simplified-PHP intermediate representation.
 --
 -- The following optimizations are supported:
 --
