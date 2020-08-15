@@ -24,6 +24,9 @@ A pre-alpha PHP backend for PureScript!
 - [ ] packages
 - [ ] tooling
 
-## OPTIMIZATIONS
 
-Moving exported functions out of the constructor as static function would improve performance by ~20%.
+## Future improvements
+
+- PIndexer / PArrayIndexer
+  Just the PIndexer should be enough, but since there was a problem with matching with indexers and accessors, I decided to create the new data structure. Improve when possible.
+  Moreover, an extra set of parentheses is being added right now. E.g. `($this->scope['something'])->foo(1)`;
