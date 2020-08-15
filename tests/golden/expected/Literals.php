@@ -4,8 +4,6 @@
  */
 declare(strict_types=1);
 
-
-
 class Literals {
     public function __construct() {
         $this->string1 = "Hello World!";
@@ -13,6 +11,7 @@ class Literals {
             return $x;
         }];
         $this->int1 = 5;
+        // FIXME: $this->int1;
         $this->int2 = $int1;
         $this->char1 = "C";
         $this->array1 = [1, 2, 3, 4];

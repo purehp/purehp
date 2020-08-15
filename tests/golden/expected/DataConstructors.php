@@ -4,8 +4,6 @@
  */
 declare(strict_types=1);
 
-
-
 class DataConstructors {
     public function __construct() {
         $this->A = new class {
