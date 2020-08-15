@@ -8,7 +8,9 @@ namespace Functions;
 
 class Inner {
     public static function fun3($x) {
-        return $x;
+        return function ($v) use ($x) {
+            return $x;
+        };
     }
 }
 

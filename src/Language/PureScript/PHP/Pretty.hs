@@ -196,6 +196,13 @@ indexer = mkPattern' match
     match (PIndexer _ index val) = (,) <$> prettyPrintPHP' index <*> pure val
     match _ = mzero
 
+-- FIXME: This should be possible with just the standard PIndexer
+arrayIndexer :: (Emit gen) => Pattern PrinterState PHP (gen, PHP)
+arrayIndexer = mkPattern' match
+  where
+    match (PArrayIndexer _ name val) = (,) <$> prettyPrintPHP' name <*> pure val
+    match _ = mzero
+
 lam :: Pattern PrinterState PHP ((Maybe Text, [Text], [Text], Maybe SourceSpan), PHP)
 lam = mkPattern match
   where
@@ -280,6 +287,7 @@ prettyPrintPHP' = A.runKleisli (runPattern matchValue)
         , [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
         , [ Wrap accessor $ \prop val -> val <> emit "->" <> emit prop ]
         , [ Wrap saccessor $ \prop val -> val <> emit "::" <> emit prop ]
+        , [ Wrap arrayIndexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
         , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
         , [ unary PNew "new " ]
         , [ Wrap lam $ \(name, args, oscope, ss) ret ->

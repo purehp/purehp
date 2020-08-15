@@ -343,11 +343,18 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
               (PVar _ name) ->
                 case fr of
                   Just IsForeign -> do
+                    traceShowIdPP args'
                     -- TODO here we're skipping the stuff at line 159. IS this a problem?
                     -- TODO: here we need to apply [modulename] to $this->scope, a bit lile PUnary? don't remember if we already were doing this
                     -- TO: return $this->scope['Functions\Inner']->fun3($b);
-                    -- FROM: return $__Functions_Inner->fun3($b);
-                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) ((accessorString $ fromString "scope") (PVar Nothing "this"))) args'
+                    -- $this->scope->fun3($b);
+                    -- $this["scope"]["__Functions_Inner"]->fun3($b);
+                    let scopePrefix = (accessorString $ fromString "scope") (PVar Nothing "this")
+                        scopeAcc = PArrayIndexer Nothing (PStringLiteral Nothing $ fromString $ T.unpack $ moduleNameToVariablePHP mn') scopePrefix
+                        -- scopeAcc = PApp Nothing (PStringLiteral Nothing $ fromString $ T.unpack $ moduleNameToVariablePHP mn') [scopePrefix]
+                    -- let scopeAcc' = (accessorString $ fromString $ T.unpack $ moduleNameToVariablePHP mn') (PVar' Nothing $ fromString "scope")
+                    --     scopeAcc = (PIndexer Nothing scopeAcc') (PVar Nothing "this")
+                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) scopeAcc) args'
                   _ ->
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
               _ -> error "Find ME"
