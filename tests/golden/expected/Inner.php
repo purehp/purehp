@@ -7,11 +7,9 @@ declare(strict_types=1);
 namespace Functions;
 
 class Inner {
-    public static function fun3($x) {
-        return function ($v) use ($x) {
-            return $x;
-        };
-    }
+    public static function fun3($x) (function ($v) use ($x) {
+        return $x;
+    })
 }
 
 ?>

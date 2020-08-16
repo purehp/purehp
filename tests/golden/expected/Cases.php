@@ -4,34 +4,25 @@
  */
 declare(strict_types=1);
 
-
-
 class Cases {
-    public function __construct() {
-
-    }
     public static function foo($x) {
-        return {
-            $__0 = $x;
-            if ($__0 === 1) {
-                return 0;
-            }
-            if ($__0 === 2) {
-                return 1;
-            }
-            return 2;
-            throw new $Error("Failed pattern match at Cases (line 4, column 9 - line 7, column 9): " + [$__0->constructor->name]);
-        };
+        $__0 = $x;
+        if ($__0 === 1) {
+            return 0;
+        }
+        if ($__0 === 2) {
+            return 1;
+        }
+        return 2;
+        throw new $Error("Failed pattern match at Cases (line 4, column 9 - line 7, column 9): " + [$__0->constructor->name]);
     }
     public static function bar($x) {
-        return {
-            $__1 = $x;
-            if ($__1) {
-                return "True!";
-            }
-            return "False!";
-            throw new $Error("Failed pattern match at Cases (line 10, column 9 - line 10, column 40): " + [$__1->constructor->name]);
-        };
+        $__1 = $x;
+        if ($__1) {
+            return "True!";
+        }
+        return "False!";
+        throw new $Error("Failed pattern match at Cases (line 10, column 9 - line 10, column 40): " + [$__1->constructor->name]);
     }
 }
 
