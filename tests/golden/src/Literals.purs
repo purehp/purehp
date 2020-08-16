@@ -16,4 +16,4 @@ array1 :: Array Int
 array1 = [1, 2, 3, 4]
 
 rec1 :: { x :: Int, y :: String, z :: Int -> Int }
-rec1 = { x: 1, y: "Hello", z: \x -> x }
+rec1 = { x: 1, y: "Hello", z: \x -> int1 }

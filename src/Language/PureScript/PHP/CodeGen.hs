@@ -232,6 +232,18 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         | fields /= [] = do
           php <- valueToPHP val []
           withPos ss php
+      -- top level variables
+      -- TODO: Writing this to handle stuff like $this->foo = $this->bar
+      -- Probably his approach will break as soon as more complex tests are added.
+      -- I think we will need to store the type of PVar somehow.
+      -- And then this shouldn't be needed anymore...
+      nonRecToPHP (ss, _, _, _) ident (Var _ qi) = do
+        let (PVar' _ v) = varToPHP' qi
+        -- TODO: identToPHP is ok here?
+            acc = (accessorString $ fromString $ T.unpack $ identToPHP ident) (PVar Nothing "this")
+            val = (accessorString $ fromString $ T.unpack v) (PVar Nothing "this")
+        withPos ss $ PAssignment Nothing acc val
+
       -- nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
       --   php <- valueToPHP val []
       --   withPos ss (PClass Nothing (Just $ runIdent ident) php)
@@ -241,8 +253,9 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
               _           -> [identToPHP arg]
             oscope = updateOScope [] phpArg
         ret <- valueToPHP val oscope
-        -- withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
-        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg ret)
+        -- NOTE this fix cases, but breaks other stuff
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
+        -- withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg ret)
 
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val []
@@ -363,7 +376,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                  else varToPHP qi
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
-      valueToPHP' (Var _ ident) _ =
+      valueToPHP' (Var _ ident) _ = do
         return $ varToPHP ident
       valueToPHP' (Case (ss, _, _, _) values binders) oscope = do
         vals <- mapM (\v -> valueToPHP v oscope) values
@@ -437,9 +450,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- qualifiedToPHP f (Qualified (Just mn') a)
       --   | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
       -- NOTE Assuming all variable access needs a $this accessor for now
+      -- is NOT ok. It breaks a lot of code.
       qualifiedToPHP f (Qualified _ a) =
-        (accessorString $ mkString $ identToPHP $ f a) (PVar Nothing "this")
-        -- PVar Nothing $ identToPHP (f a)
+        -- (accessorString $ mkString $ identToPHP $ f a) (PVar Nothing "this")
+        PVar Nothing $ identToPHP (f a)
 
       -- | Same as qualifiedToPHP, but generates PVar' (no $)
       -- TODO: This might need to be reworked in the future
