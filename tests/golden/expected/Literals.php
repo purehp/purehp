@@ -11,8 +11,7 @@ class Literals {
             return $x;
         }];
         $this->int1 = 5;
-        // FIXME: $this->int1;
-        $this->int2 = $int1;
+        $this->int2 = $this->int1;
         $this->char1 = "C";
         $this->array1 = [1, 2, 3, 4];
     }

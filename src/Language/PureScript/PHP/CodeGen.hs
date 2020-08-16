@@ -336,24 +336,15 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
-          Var (_, _, _, fr) qi@(Qualified (Just mn') _) -> do
+          Var (_, _, _, fr) (Qualified (Just mn') _) -> do
             f' <- valueToPHP f oscope
             case f' of
               -- TODO is this approach too specific here?
               (PVar _ name) ->
                 case fr of
                   Just IsForeign -> do
-                    traceShowIdPP args'
-                    -- TODO here we're skipping the stuff at line 159. IS this a problem?
-                    -- TODO: here we need to apply [modulename] to $this->scope, a bit lile PUnary? don't remember if we already were doing this
-                    -- TO: return $this->scope['Functions\Inner']->fun3($b);
-                    -- $this->scope->fun3($b);
-                    -- $this["scope"]["__Functions_Inner"]->fun3($b);
                     let scopePrefix = (accessorString $ fromString "scope") (PVar Nothing "this")
                         scopeAcc = PArrayIndexer Nothing (PStringLiteral Nothing $ fromString $ T.unpack $ moduleNameToVariablePHP mn') scopePrefix
-                        -- scopeAcc = PApp Nothing (PStringLiteral Nothing $ fromString $ T.unpack $ moduleNameToVariablePHP mn') [scopePrefix]
-                    -- let scopeAcc' = (accessorString $ fromString $ T.unpack $ moduleNameToVariablePHP mn') (PVar' Nothing $ fromString "scope")
-                    --     scopeAcc = (PIndexer Nothing scopeAcc') (PVar Nothing "this")
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) scopeAcc) args'
                   _ ->
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
@@ -362,13 +353,14 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
           unApp other args           = (other, args)
-      valueToPHP' (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) _ =
+      valueToPHP' (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) _ = do
         return $ if mn' == mn
                  then foreignIdent mn' ident
                  else varToPHP qi
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
-      valueToPHP' (Var _ ident) _ = return $ varToPHP ident
+      valueToPHP' (Var _ ident) _ =
+        return $ varToPHP ident
       valueToPHP' (Case (ss, _, _, _) values binders) oscope = do
         vals <- mapM (\v -> valueToPHP v oscope) values
         bindersToPHP ss binders vals
@@ -440,7 +432,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- TODO changed moduleNameToPHP
       -- qualifiedToPHP f (Qualified (Just mn') a)
       --   | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
-      qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
+      -- NOTE Assuming all variable access needs a $this accessor for now
+      qualifiedToPHP f (Qualified _ a) =
+        (accessorString $ mkString $ identToPHP $ f a) (PVar Nothing "this")
+        -- PVar Nothing $ identToPHP (f a)
 
       -- | Same as qualifiedToPHP, but generates PVar' (no $)
       -- TODO: This might need to be reworked in the future
@@ -452,6 +447,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       qualifiedToPHP' f (Qualified _ a) = PVar' Nothing $ identToPHP (f a)
 
       -- TODO use the module name appropriately.
+      -- TODO Is this used anymore?
       foreignIdent :: P.ModuleName -> Ident -> PHP
       foreignIdent mn ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")
 
