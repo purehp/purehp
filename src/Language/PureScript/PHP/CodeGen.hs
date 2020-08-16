@@ -241,7 +241,8 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
               _           -> [identToPHP arg]
             oscope = updateOScope [] phpArg
         ret <- valueToPHP val oscope
-        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
+        -- withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg ret)
 
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val []
@@ -300,26 +301,29 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       valueToPHP' (Accessor _ prop val) oscope =
         accessorString prop <$> valueToPHP val oscope
       valueToPHP' (ObjectUpdate _ o ps) _ = error "Object Update not implemented"
-      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ =
+      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ = do
         let args = unAbs e
             vars = map assign args
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- args ]
               in PMethod Nothing ["public"] "__construct" (identToPHP `map` args) (PBlock Nothing True body)
-        in return $ PBlock Nothing True (vars <> [constructor])
+        return $ PBlock Nothing True (vars <> [constructor])
         where
           unAbs :: Expr Ann -> [Ident]
           unAbs (Abs _ arg val) = arg : unAbs val
           unAbs _               = []
           assign :: Ident -> PHP
           assign name = PClassVariableIntroduction Nothing (runIdent name) Nothing
+      -- NOTE It seems like this case is never reached
       valueToPHP' (Abs _ arg val@Case{}) oscope = do
+        traceShowIdPP "ABS CASE"
         let phpArg = case arg of
                         UnusedIdent -> []
                         _           -> [identToPHP arg]
             oscope' = updateOScope oscope phpArg
         ret <- valueToPHP val oscope'
-        return $ PFunction Nothing Nothing phpArg oscope ret -- (PBlock Nothing True [ret])
+        return $ PBlock Nothing False [ret]
+        -- return $ PFunction Nothing Nothing phpArg oscope ret -- (PBlock Nothing True [ret])
       valueToPHP' (Abs _ arg val) oscope = do
         let phpArg = case arg of
                         UnusedIdent -> []
