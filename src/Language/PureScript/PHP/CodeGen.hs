@@ -232,37 +232,41 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         | fields /= [] = do
           php <- valueToPHP val []
           withPos ss php
+
       -- top level variables
       -- TODO: Writing this to handle stuff like $this->foo = $this->bar
       -- Probably his approach will break as soon as more complex tests are added.
       -- I think we will need to store the type of PVar somehow.
       -- And then this shouldn't be needed anymore...
-      -- nonRecToPHP (ss, _, _, _) ident (Var _ qi) = do
-      --   let (PVar' _ v) = varToPHP' qi
-      --   -- TODO: identToPHP is ok here?
-      --       acc = (accessorString $ fromString $ T.unpack $ identToPHP ident) (PVar Nothing "this")
-      --       val = (accessorString $ fromString $ T.unpack v) (PVar Nothing "this")
-      --   withPos ss $ PAssignment Nothing acc val
+      nonRecToPHP (ss, _, _, _) ident (Var _ qi) = do
+        let (PVar' _ v) = varToPHP' qi
+        -- TODO: identToPHP is ok here?
+            acc = (accessorString $ fromString $ T.unpack $ identToPHP ident) (PVar Nothing "this")
+            val = (accessorString $ fromString $ T.unpack v) (PVar Nothing "this")
+        withPos ss $ PAssignment Nothing acc val
 
       -- nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
       --   php <- valueToPHP val []
       --   withPos ss (PClass Nothing (Just $ runIdent ident) php)
+
       -- Top level cases.
-      -- nonRecToPHP (ss, _, _, _) ident a@(Abs _ arg val@Case{}) = do
-      --   -- TODO is this phpArg part really needed?
-      --   let phpArg = case arg of
-      --         UnusedIdent -> []
-      --         _           -> [identToPHP arg]
-      --       oscope = updateOScope [] phpArg
-      --   caseBlock <- valueToPHP a oscope
-      --   withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg caseBlock)
+      nonRecToPHP (ss, _, _, _) ident a@(Abs _ arg val@Case{}) = do
+        -- TODO is this phpArg part really needed?
+        let phpArg = case arg of
+              UnusedIdent -> []
+              _           -> [identToPHP arg]
+            oscope = updateOScope [] phpArg
+        caseBlock <- valueToPHP a oscope
+        -- TODO: this generates bad identation, wait to fix until we check nested cases.
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg caseBlock)
+
       nonRecToPHP (ss, _, _, _) ident (Abs _ arg val) = do
         let phpArg = case arg of
               UnusedIdent -> []
               _           -> [identToPHP arg]
             oscope = updateOScope [] phpArg
         ret <- valueToPHP val oscope
-        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg ret)
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg (PBlock Nothing True [PReturn Nothing ret]))
 
       nonRecToPHP (ss, _, _, _) ident val = do
         php <- valueToPHP val []
@@ -341,7 +345,6 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             oscope' = updateOScope oscope phpArg
         ret <- valueToPHP val oscope'
         return $ PBlock Nothing False [ret]
-        -- return $ PFunction Nothing Nothing phpArg oscope ret -- (PBlock Nothing True [ret])
       valueToPHP' (Abs _ arg val) oscope = do
         let phpArg = case arg of
                         UnusedIdent -> []
