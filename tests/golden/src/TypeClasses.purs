@@ -11,4 +11,5 @@ instance functorFoo :: Functor Foo where
 bar :: Foo Int -> Foo Int
 bar = map (\_ -> 2)
 
+baz :: Foo Int
 baz = bar (Foo 1)

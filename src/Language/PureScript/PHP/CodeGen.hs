@@ -373,7 +373,10 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) scopeAcc) args'
                   _ ->
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
-              _ -> error "Find ME"
+              _ ->
+                -- FIXME: replicating here the general case below. Not sure if it will be ok
+                flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
+          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
