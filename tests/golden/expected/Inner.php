@@ -4,11 +4,13 @@
  */
 declare(strict_types=1);
 
-namespace \Functions;
+namespace Functions;
 
 class Inner {
     public static function fun3($x) {
-        return $x;
+        return function ($v) use ($x) {
+            return $x;
+        };
     }
 }
 

@@ -12,7 +12,7 @@ import Data.Text (Text)
 import Language.PureScript.AST (SourceSpan(..))
 import Language.PureScript.Comments
 import Language.PureScript.PSString (PSString)
-import Language.PureScript.Traversals
+-- import Language.PureScript.Traversals
 
 -- | Built-in unary operators
 -- Copying js for now
@@ -46,6 +46,7 @@ data BinaryOperator
   | PShiftLeft
   | PShiftRight
   | PZeroFillShiftRight
+  | PArrayAccessor
   deriving (Show, Eq)
 
 data PHP
@@ -63,6 +64,9 @@ data PHP
   -- ^ An array literal
   | PAssociativeArrayField (Maybe SourceSpan) Text PHP
   -- ^ A field declaration for an associative array
+  | PArrayIndexer (Maybe SourceSpan) PHP PHP
+  -- ^ Array field accessor
+  -- FIXME The array indexer shouldn't be neccessary. We already have the indexer, fix that.
   | PIndexer (Maybe SourceSpan) PHP PHP
   -- ^ Class method accessor
   | PStaticIndexer (Maybe SourceSpan) PHP PHP
@@ -126,6 +130,7 @@ withSourceSpan withSpan = go where
   go (PBinary _ op j1 j2) = PBinary ss op j1 j2
   go (PArrayLiteral _ js) = PArrayLiteral ss js
   go (PAssociativeArrayField _ n v) = PAssociativeArrayField ss n v
+  go (PArrayIndexer _ j1 j2) = PArrayIndexer ss j1 j2
   go (PIndexer _ j1 j2) = PIndexer ss j1 j2
   go (PStaticIndexer _ j1 j2) = PStaticIndexer ss j1 j2
   go (PObjectLiteral _ js) = PObjectLiteral ss js
@@ -161,6 +166,7 @@ getSourceSpan = go where
   go (PBinary ss _ _ _) = ss
   go (PArrayLiteral ss _) = ss
   go (PAssociativeArrayField ss _ _) = ss
+  go (PArrayIndexer ss _ _) = ss
   go (PIndexer ss _ _) = ss
   go (PStaticIndexer ss _ _) = ss
   go (PObjectLiteral ss  _) = ss
@@ -192,6 +198,7 @@ everywhere f = go where
   go (PUnary ss op j) = f (PUnary ss op (go j))
   go (PBinary ss op j1 j2) = f (PBinary ss op (go j1) (go j2))
   go (PArrayLiteral ss js) = f (PArrayLiteral ss (map go js))
+  go (PArrayIndexer ss j1 j2) = f (PArrayIndexer ss j1 (go j2))
   go (PIndexer ss j1 j2) = f (PIndexer ss (go j1) (go j2))
   go (PStaticIndexer ss j1 j2) = f (PStaticIndexer ss (go j1) (go j2))
   go (PObjectLiteral ss js) = f (PObjectLiteral ss (map go js)) -- (map (fmap go) js))
@@ -223,6 +230,7 @@ everywhereTopDownM f = f >=> go where
   go (PUnary ss op j) = PUnary ss op <$> f' j
   go (PBinary ss op j1 j2) = PBinary ss op <$> f' j1 <*> f' j2
   go (PArrayLiteral ss js) = PArrayLiteral ss <$> traverse f' js
+  go (PArrayIndexer ss j1 j2) = PArrayIndexer ss j1 <$> f' j2
   go (PIndexer ss j1 j2) = PIndexer ss <$> f' j1 <*> f' j2
   go (PStaticIndexer ss j1 j2) = PStaticIndexer ss <$> f' j1 <*> f' j2
   go (PObjectLiteral ss js) = PObjectLiteral ss <$> traverse f' js -- traverse (sndM f') js
@@ -250,6 +258,7 @@ everything (<>.) f = go where
   go j@(PUnary _ _ j1) = f j <>. go j1
   go j@(PBinary _ _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PArrayLiteral _ js) = foldl (<>.) (f j) (map go js)
+  go j@(PArrayIndexer _ _ j2) = f j <>. go j2
   go j@(PIndexer _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PStaticIndexer _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(PObjectLiteral _ js) = foldl (<>.) (f j) (map go js) -- (map (go . snd) js)

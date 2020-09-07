@@ -4,8 +4,6 @@
  */
 declare(strict_types=1);
 
-
-
 class Let {
     public function __construct() {
         $this->foo = (function () {

@@ -232,9 +232,34 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
         | fields /= [] = do
           php <- valueToPHP val []
           withPos ss php
+
+      -- top level variables
+      -- TODO: Writing this to handle stuff like $this->foo = $this->bar
+      -- Probably his approach will break as soon as more complex tests are added.
+      -- I think we will need to store the type of PVar somehow.
+      -- And then this shouldn't be needed anymore...
+      nonRecToPHP (ss, _, _, _) ident (Var _ qi) = do
+        let (PVar' _ v) = varToPHP' qi
+        -- TODO: identToPHP is ok here?
+            acc = (accessorString $ fromString $ T.unpack $ identToPHP ident) (PVar Nothing "this")
+            val = (accessorString $ fromString $ T.unpack v) (PVar Nothing "this")
+        withPos ss $ PAssignment Nothing acc val
+
       -- nonRecToPHP (ss, _, _, _) ident val@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
       --   php <- valueToPHP val []
       --   withPos ss (PClass Nothing (Just $ runIdent ident) php)
+
+      -- Top level cases.
+      nonRecToPHP (ss, _, _, _) ident a@(Abs _ arg val@Case{}) = do
+        -- TODO is this phpArg part really needed?
+        let phpArg = case arg of
+              UnusedIdent -> []
+              _           -> [identToPHP arg]
+            oscope = updateOScope [] phpArg
+        caseBlock <- valueToPHP a oscope
+        -- TODO: this generates bad identation, wait to fix until we check nested cases.
+        withPos ss (PMethod Nothing ["public", "static"] (runIdent ident) phpArg caseBlock)
+
       nonRecToPHP (ss, _, _, _) ident (Abs _ arg val) = do
         let phpArg = case arg of
               UnusedIdent -> []
@@ -300,13 +325,13 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       valueToPHP' (Accessor _ prop val) oscope =
         accessorString prop <$> valueToPHP val oscope
       valueToPHP' (ObjectUpdate _ o ps) _ = error "Object Update not implemented"
-      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ =
+      valueToPHP' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) _ = do
         let args = unAbs e
             vars = map assign args
             constructor =
               let body = [ PAssignment Nothing ((accessorString $ mkString $ identToPHP f) (PVar Nothing "this")) (var f) | f <- args ]
               in PMethod Nothing ["public"] "__construct" (identToPHP `map` args) (PBlock Nothing True body)
-        in return $ PBlock Nothing True (vars <> [constructor])
+        return $ PBlock Nothing True (vars <> [constructor])
         where
           unAbs :: Expr Ann -> [Ident]
           unAbs (Abs _ arg val) = arg : unAbs val
@@ -319,7 +344,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
                         _           -> [identToPHP arg]
             oscope' = updateOScope oscope phpArg
         ret <- valueToPHP val oscope'
-        return $ PFunction Nothing Nothing phpArg oscope ret -- (PBlock Nothing True [ret])
+        return $ PBlock Nothing False [ret]
       valueToPHP' (Abs _ arg val) oscope = do
         let phpArg = case arg of
                         UnusedIdent -> []
@@ -336,32 +361,34 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
           Var (_, _, _, Just IsTypeClassConstructor) name ->
             return $ PUnary Nothing PNew $ PApp Nothing (qualifiedToPHP' id name) args'
-          Var (_, _, _, fr) qi@(Qualified (Just mn') _) -> do
+          Var (_, _, _, fr) (Qualified (Just mn') _) -> do
             f' <- valueToPHP f oscope
             case f' of
               -- TODO is this approach too specific here?
               (PVar _ name) ->
                 case fr of
                   Just IsForeign -> do
-                    -- TODO here we're skipping the stuff at line 159. IS this a problem?
-                    -- TODO: here we need to apply [modulename] to $this->scope, a bit lile PUnary? don't remember if we already were doing this
-                    -- TO: return $this->scope['Functions\Inner']->fun3($b);
-                    -- FROM: return $__Functions_Inner->fun3($b);
-                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) ((accessorString $ fromString "scope") (PVar Nothing "this"))) args'
+                    let scopePrefix = (accessorString $ fromString "scope") (PVar Nothing "this")
+                        scopeAcc = PArrayIndexer Nothing (PStringLiteral Nothing $ fromString $ T.unpack $ moduleNameToVariablePHP mn') scopePrefix
+                    return $ foldl (\fn a -> PApp Nothing fn [a]) ((accessorString $ fromString $ T.unpack name) scopeAcc) args'
                   _ ->
                     return $ foldl (\fn a -> PApp Nothing fn [a]) ((staticAccessorString $ fromString $ T.unpack name) (PVar' Nothing "self")) args'
-              _ -> error "Find ME"
+              _ ->
+                -- FIXME: replicating here the general case below. Not sure if it will be ok
+                flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
+          _ -> flip (foldl (\fn a -> PApp Nothing fn [a])) args' <$> valueToPHP f oscope
         where
           unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
           unApp (App _ val arg) args = unApp val (arg : args)
           unApp other args           = (other, args)
-      valueToPHP' (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) _ =
+      valueToPHP' (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) _ = do
         return $ if mn' == mn
                  then foreignIdent mn' ident
                  else varToPHP qi
       -- valueToPHP' (Var (_, _, _, Just (IsConstructor _ fields)) ident)
       --   | fields /= [] = return $ varToPHP' ident
-      valueToPHP' (Var _ ident) _ = return $ varToPHP ident
+      valueToPHP' (Var _ ident) _ = do
+        return $ varToPHP ident
       valueToPHP' (Case (ss, _, _, _) values binders) oscope = do
         vals <- mapM (\v -> valueToPHP v oscope) values
         bindersToPHP ss binders vals
@@ -433,7 +460,11 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       -- TODO changed moduleNameToPHP
       -- qualifiedToPHP f (Qualified (Just mn') a)
       --   | mn /= mn' = accessor (f a) (PVar Nothing (moduleNameToPHP mn'))
-      qualifiedToPHP f (Qualified _ a) = PVar Nothing $ identToPHP (f a)
+      -- NOTE Assuming all variable access needs a $this accessor for now
+      -- is NOT ok. It breaks a lot of code.
+      qualifiedToPHP f (Qualified _ a) =
+        -- (accessorString $ mkString $ identToPHP $ f a) (PVar Nothing "this")
+        PVar Nothing $ identToPHP (f a)
 
       -- | Same as qualifiedToPHP, but generates PVar' (no $)
       -- TODO: This might need to be reworked in the future
@@ -445,6 +476,7 @@ moduleToPHP (Module _ coms mn _ imps exps foreigns decls) foreign_ =
       qualifiedToPHP' f (Qualified _ a) = PVar' Nothing $ identToPHP (f a)
 
       -- TODO use the module name appropriately.
+      -- TODO Is this used anymore?
       foreignIdent :: P.ModuleName -> Ident -> PHP
       foreignIdent mn ident = accessorString (mkString $ runIdent ident) (PVar Nothing "__foreign")
 
