@@ -7,17 +7,21 @@ A pre-alpha PHP backend for PureScript!
 
 ## TODO
 
-- [x] Numers/Strings/Bools
+- [ ] Literals
+  Crashes somewhere with a wrong pattern match.
 - [x] Variables
-- [x] Data constructors
+- [ ] Data constructors
+  The old implementation is not working anymore since we can't have a class
+  inside another class. Can we pull them out? How will imports work then?
 - [x] Functions
-- [x] if/else
-- [x] case
-- [x] let
-- [x] typeclasses
+- [ ] if/else
+- [ ] case
+- [ ] let
+  I'm not sure whether the current implementation makes any sense.
+- [ ] typeclasses
 - [ ] exceptions
-- [ ] imports
-- [ ] qualified imports
+- [x] imports
+- [x] qualified imports
 - [ ] working prelude
 - [ ] ffi
 - [ ] optimization
